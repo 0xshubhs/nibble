@@ -30,7 +30,7 @@ import type { CaptureSource, PermissionResult, SourceInstance } from '../../type
 const source: CaptureSource = {
   id: 'screen',
   label: 'Screen',
-  description: 'Reads text off your screen on a timer. Not capturing yet — this is the last phase.',
+  description: 'Reads text off your screen on a timer. Not capturing yet; this is the last phase.',
   platforms: ['darwin', 'win32', 'linux'],
   permission: 'screen',
   implemented: false,
@@ -41,7 +41,7 @@ const source: CaptureSource = {
         ok: false,
         reason: 'Not wired up yet',
         permission: 'not-required',
-        note: 'No OS permission gate here — the on-screen indicator is the only thing telling you it is running.',
+        note: 'No OS permission gate here. The on-screen indicator is the only thing telling you it is running.',
       };
     }
     let permission = 'unknown';

@@ -148,7 +148,7 @@ export class McpBridge {
           hits
             .map((h, i) => {
               const when = new Date(h.ts).toISOString().slice(0, 16).replace('T', ' ');
-              const head = h.title ? `${h.title} — ` : '';
+              const head = h.title ? `${h.title}: ` : '';
               return `[${i + 1}] ${head}${h.source}, ${when} (matched on ${h.matched})\n${excerpt(h.text)}`;
             })
             .join('\n\n')
@@ -245,7 +245,7 @@ export class McpBridge {
             .map((r) => {
               const when = new Date(r.snoozedUntil ?? r.at).toLocaleString();
               const rep = r.repeat === 'none' ? 'once' : r.repeat;
-              return `${r.enabled ? '•' : '◦'} ${r.title} — ${when} (${rep})${r.body ? `\n   ${r.body}` : ''}`;
+              return `${r.enabled ? '•' : '◦'} ${r.title}, ${when} (${rep})${r.body ? `\n   ${r.body}` : ''}`;
             })
             .join('\n')
         );

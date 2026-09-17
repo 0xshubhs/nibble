@@ -362,7 +362,7 @@ async function runSearch(): Promise<void> {
   $('m-hint').textContent = !s
     ? ''
     : s.pending > 0
-      ? `${s.pending} of ${s.chunks} still being indexed — searching by keyword until then.`
+      ? `${s.pending} of ${s.chunks} still being indexed, so searching by keyword until then.`
       : q
         ? `${results.length} result${results.length === 1 ? '' : 's'} from ${s.chunks} chunks.`
         : `Most recent of ${s.chunks} chunks.`;
@@ -493,7 +493,7 @@ function renderConnector(): void {
           : 'No calls yet.'
       }`
     : info.error
-      ? `Off — last error: ${info.error}`
+      ? `Off. Last error: ${info.error}`
       : 'Off. Turn it on to let Claude, ChatGPT or any MCP client read this memory.';
 
   if (!info.running) return;
@@ -533,7 +533,7 @@ function renderMemoryStats(): void {
     )[e.status] ?? e.status;
 
   $('m-model').textContent =
-    `Embedding with ${e.model} (${e.backend === 'local' ? 'on this device' : e.provider}, ${e.dim} dims) — ${statusText}.`;
+    `Embedding with ${e.model} (${e.backend === 'local' ? 'on this device' : e.provider}, ${e.dim} dims): ${statusText}.`;
 }
 
 function renderMemory(): void {

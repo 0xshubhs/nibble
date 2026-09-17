@@ -2,12 +2,12 @@
 
 A portable, background-running desktop app for **macOS, Windows and Linux** that
 keeps a local memory of what you capture, indexes it on device, and exposes it to
-any LLM over MCP — plus reminders that fire as real system notifications.
+any LLM over MCP, plus reminders that fire as real system notifications.
 
 One Electron codebase, three real builds: a `.dmg`, a portable `.exe` and an
 `.AppImage`. No account, no server, no telemetry.
 
-Written in TypeScript, strict mode, no bundler — plain `tsc` to `out/`.
+Written in TypeScript, strict mode, with no bundler: plain `tsc` to `out/`.
 
 ```
 npm install
@@ -21,7 +21,7 @@ npm run build:linux # .AppImage + .deb + .tar.gz
 ```
 
 `rootDir` is `src` and `outDir` is `out`, so every file compiles to the same
-depth it was written at — `src/main/index.ts` becomes `out/main/index.js`. The
+depth it was written at: `src/main/index.ts` becomes `out/main/index.js`. The
 main process resolves the preload, the renderer, the embedding worker and the
 MCP relay through `__dirname`, and this keeps all of those paths correct
 without a single change between running from source and running packaged.
@@ -43,7 +43,7 @@ three natively and attaches the results to a GitHub release when you push a tag.
 ## The memory
 
 Capture and indexing are decoupled. Text is written and **keyword-searchable
-immediately**, with its vector slot zeroed and filled in behind it — so a model
+immediately**, with its vector slot zeroed and filled in behind it, so a model
 that is still downloading degrades search quality instead of dropping data.
 
 Search fuses BM25 and cosine similarity with Reciprocal Rank Fusion, so the two
@@ -76,7 +76,7 @@ Deletions are tombstones; **Compact** reclaims the space.
 | `local` (default) | `Xenova/all-MiniLM-L6-v2` | 384 | ~23 MB, downloaded once, then fully offline |
 | `cloud` | Gemini or Voyage | 768 / 1024 | Better recall, needs an API key, text leaves the device |
 
-The local model runs in a `utilityProcess` — embedding a batch is tens of
+The local model runs in a `utilityProcess`. Embedding a batch is tens of
 milliseconds of CPU, which in the main process would stall the tray, the window
 and the reminder timers. Switching backends invalidates the stored vectors and
 re-embeds in the background, because vectors from different models are not
@@ -92,7 +92,7 @@ comparable even at the same width.
 | **Screen** | phase 3 | Same. The most invasive source, so it ships last and with the strictest treatment |
 
 Sources that are not built yet still register and report their real permission
-state — they say they are not capturing rather than implying that they are.
+state. They say they are not capturing rather than implying that they are.
 
 There is a global **pause** that keeps sources running but stores nothing, and a
 **forget** on every result and every source.
@@ -100,11 +100,11 @@ There is a global **pause** that keeps sources running but stores nothing, and a
 ## Connecting an LLM
 
 Turn on the connector in the Memory tab. It binds to `127.0.0.1` only, and every
-request needs a bearer token — anything that can run on your machine can reach
+request needs a bearer token, because anything that can run on your machine can reach
 loopback, and browsers will happily POST there, so the Origin header is checked
 too.
 
-**Claude Code / Claude Desktop** — spawn the stdio relay:
+**Claude Code / Claude Desktop**: spawn the stdio relay.
 
 ```
 claude mcp add nibble -- node /path/to/src/mcp/stdio.js
@@ -113,7 +113,7 @@ claude mcp add nibble -- node /path/to/src/mcp/stdio.js
 The app shows the exact path. The relay is dependency-free on purpose: a client
 spawns it with a plain `node`, which cannot `require` out of a packaged asar.
 
-**Anything that takes a URL** — `http://127.0.0.1:8787/mcp` with the token as a
+**Anything that takes a URL**: `http://127.0.0.1:8787/mcp`, with the token as a
 `Bearer` header.
 
 ### Tools it exposes
@@ -137,7 +137,7 @@ Portable mode turns on when any of these is true, and everything lives in a
 - running as an AppImage (sets `APPIMAGE`)
 - a file named `portable` sits next to the executable
 
-Otherwise it uses the normal per-user location — `~/Library/Application Support`,
+Otherwise it uses the normal per-user location: `~/Library/Application Support`,
 `%APPDATA%`, or `~/.config`. The tray menu's **Show data folder** opens whichever
 is in use.
 
@@ -176,7 +176,7 @@ other is a compile error rather than a runtime `undefined`.
 
 ## Development
 
-`--screenshot=<file>` renders the window, captures it and exits — handy for
+`--screenshot=<file>` renders the window, captures it and exits. Handy for
 checking a change without a screen grab picking up whatever else is in front:
 
 ```
@@ -207,10 +207,10 @@ The product name appears in `package.json` (`productName`), `electron-builder.ym
 ## Publishing the site
 
 The landing page lives in `site/index.html`. `.github/workflows/pages.yml`
-deploys it, but it only runs when you trigger it — deploying makes the page
+deploys it, but it only runs when you trigger it, because deploying makes the page
 public. Turn Pages on under **Settings → Pages → Source: GitHub Actions**, then
 run the **pages** workflow.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

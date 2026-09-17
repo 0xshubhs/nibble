@@ -29,7 +29,7 @@ import type { CaptureSource, PermissionResult, SourceInstance } from '../../type
 
 const PLATFORM_NOTE: Partial<Record<NodeJS.Platform, string>> = {
   darwin:
-    'Microphone works. System audio needs a virtual output device (e.g. BlackHole) — macOS has no loopback.',
+    'Microphone works. System audio needs a virtual output device (e.g. BlackHole), because macOS has no loopback.',
   win32: 'Microphone and system audio both work through WASAPI loopback.',
   linux: 'Microphone and system audio both work through the PulseAudio monitor source.',
 };
@@ -38,12 +38,12 @@ const source: CaptureSource = {
   id: 'audio',
   label: 'Meetings & audio',
   description:
-    'Transcribes what you say and hear, on device. Not capturing yet — this is the next phase.',
+    'Transcribes what you say and hear, on device. Not capturing yet; this is the next phase.',
   platforms: ['darwin', 'win32', 'linux'],
   permission: 'microphone',
   implemented: false,
 
-  /** Real, live permission state — used by the UI to show what it would need. */
+  /** Real, live permission state, used by the UI to show what it would need. */
   available() {
     const note = PLATFORM_NOTE[process.platform] ?? '';
     if (process.platform !== 'darwin') {

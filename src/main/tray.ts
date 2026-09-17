@@ -64,7 +64,7 @@ export class AppTray {
 
     const upcomingItems: MenuItemConstructorOptions[] = upcoming.length
       ? upcoming.map((r) => ({
-          label: `${r.title}  —  ${humanTime(r.snoozedUntil ?? r.at)}`,
+          label: `${r.title} ,  ${humanTime(r.snoozedUntil ?? r.at)}`,
           submenu: [
             { label: 'Open', click: () => this.deps.onShow(r.id) },
             {
