@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;"
+    />
+    <title>Nibble</title>
+    <link rel="stylesheet" href="notch.css" />
+  </head>
+  <body class="collapsed">
+    <!-- The shell is black so it reads as an extension of the physical notch
+         rather than a window sitting near it. -->
+    <div class="shell" id="shell">
+      <div class="lip" id="lip">
+        <span class="dot" id="dot"></span>
+        <span class="lip-text" id="lip-text"></span>
+      </div>
+
+      <div class="body" id="panel">
+        <div class="row">
+          <input
+            id="q"
+            type="search"
+            placeholder="Ask your memory…"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </div>
+
+        <ul class="hits" id="hits"></ul>
+        <p class="empty" id="empty">Drop text or a file here to remember it.</p>
+
+        <div class="foot">
+          <span id="next">No reminders</span>
+          <span class="spacer"></span>
+          <button class="ghost" id="pause">Pause</button>
+          <button class="ghost" id="open">Open</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="drop" id="drop"><span>Release to remember</span></div>
+
+    <script src="notch.js"></script>
+  </body>
+</html>

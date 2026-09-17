@@ -64,6 +64,15 @@ export interface Settings {
   mcpEnabled: boolean;
   mcpPort: number;
   mcpToken: string;
+
+  /** macOS only: the panel that hangs off the notch. */
+  notchEnabled: boolean;
+  /**
+   * Width of the hover target, in points. macOS exposes the real notch size
+   * only through NSScreen.safeAreaInsets, which Electron does not surface, so
+   * this is a sane default the user can nudge.
+   */
+  notchWidth: number;
 }
 
 export interface StoreData {
@@ -263,6 +272,14 @@ export interface McpInfo {
 
 /* ---------------- the state the window renders ---------------- */
 
+export interface NotchCapability {
+  /** The platform supports it at all. */
+  supported: boolean;
+  /** Our best guess that this Mac physically has a notch. */
+  likelyNotched: boolean;
+  enabled: boolean;
+}
+
 export interface AppMeta {
   version: string;
   name: string;
@@ -272,6 +289,7 @@ export interface AppMeta {
   notifications: boolean;
   /** Absolute path to the stdio relay, for the connect instructions. */
   relay: string;
+  notch: NotchCapability;
 }
 
 export interface MemoryView {
@@ -335,10 +353,23 @@ export interface RendererApi {
   setMcp(enabled: boolean): Promise<McpInfo>;
   regenerateMcpToken(): Promise<McpInfo>;
 
+  setNotch(enabled: boolean): Promise<boolean>;
+
+  /**
+   * A sandboxed renderer gets no usable path off a dropped File, so the
+   * preload resolves it through webUtils and the main process reads it.
+   */
+  pathForFile(file: File): string;
+  rememberFiles(paths: string[]): Promise<number>;
+  showWindow(): Promise<void>;
+
   revealData(): Promise<string>;
   quit(): Promise<void>;
 
-  /** Both return an unsubscribe function. */
+  /** All of these return an unsubscribe function. */
   onState(cb: (state: Snapshot) => void): () => void;
   onFocusReminder(cb: (id: string) => void): () => void;
+  onNotchExpanded(cb: (expanded: boolean) => void): () => void;
+  onNotchPulse(cb: (label: string) => void): () => void;
+  onNotchGeometry(cb: (g: { menuBarHeight: number; notchWidth: number }) => void): () => void;
 }

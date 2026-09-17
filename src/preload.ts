@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { RendererApi } from './types';
 
 /**
@@ -41,6 +41,14 @@ const api: RendererApi = {
   setMcp: (enabled) => ipcRenderer.invoke('mcp:set', enabled),
   regenerateMcpToken: () => ipcRenderer.invoke('mcp:regenerate'),
 
+  // --- notch panel ---
+  setNotch: (enabled) => ipcRenderer.invoke('notch:set', enabled),
+  // Not an IPC call: webUtils resolves the path synchronously in the preload,
+  // which is the only place with the privilege to do it.
+  pathForFile: (file) => webUtils.getPathForFile(file),
+  rememberFiles: (paths) => ipcRenderer.invoke('memory:remember-files', paths),
+  showWindow: () => ipcRenderer.invoke('app:show-window'),
+
   revealData: () => ipcRenderer.invoke('app:reveal-data'),
   quit: () => ipcRenderer.invoke('app:quit'),
 
@@ -53,6 +61,24 @@ const api: RendererApi = {
     const h = (_e: Electron.IpcRendererEvent, id: string): void => cb(id);
     ipcRenderer.on('focus-reminder', h);
     return () => ipcRenderer.off('focus-reminder', h);
+  },
+  onNotchExpanded: (cb) => {
+    const h = (_e: Electron.IpcRendererEvent, on: boolean): void => cb(on);
+    ipcRenderer.on('notch:expanded', h);
+    return () => ipcRenderer.off('notch:expanded', h);
+  },
+  onNotchPulse: (cb) => {
+    const h = (_e: Electron.IpcRendererEvent, label: string): void => cb(label);
+    ipcRenderer.on('notch:pulse', h);
+    return () => ipcRenderer.off('notch:pulse', h);
+  },
+  onNotchGeometry: (cb) => {
+    const h = (
+      _e: Electron.IpcRendererEvent,
+      g: { menuBarHeight: number; notchWidth: number }
+    ): void => cb(g);
+    ipcRenderer.on('notch:geometry', h);
+    return () => ipcRenderer.off('notch:geometry', h);
   },
 };
 

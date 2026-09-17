@@ -1,0 +1,176 @@
+/* The panel is drawn entirely in black so it merges with the notch. Only the
+   expanded body has any visible edge. */
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  color: #f2f2f7;
+  cursor: default;
+  user-select: none;
+}
+
+.shell {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* The strip level with the menu bar.
+ *
+ * Collapsed it paints nothing at all. Drawing a black lip only looks right if
+ * it exactly covers the physical notch, and nothing can tell us how wide that
+ * is: macOS exposes it solely through NSScreen.safeAreaInsets. Any guess shows
+ * up as black wings on one machine and a gap on another, so at rest the panel
+ * is simply invisible and only the hover target exists.
+ *
+ * Its height is the real menu bar height, sent by the main process, so the
+ * body opens flush beneath the menu bar rather than overlapping it.
+ */
+.lip {
+  width: var(--notch-w, 200px);
+  height: var(--menubar-h, 32px);
+  background: transparent;
+  border-radius: 0 0 12px 12px;
+  transition: width 0.22s cubic-bezier(0.22, 1, 0.36, 1), background 0.18s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+body.expanded .lip { width: 100%; border-radius: 0; background: #000; }
+/* A capture pulse is the one time the collapsed panel shows itself. */
+body.pulsing .lip { background: #000; }
+
+.dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: #30d158;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.lip-text {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.01em;
+  color: #f2f2f7; opacity: 0; max-width: 0; overflow: hidden; white-space: nowrap;
+  transition: opacity 0.2s ease, max-width 0.22s ease;
+}
+body.pulsing .dot { opacity: 1; }
+body.pulsing .lip-text { opacity: 1; max-width: 150px; }
+
+/* The part that only exists when open. */
+.body {
+  width: 100%;
+  background: #000;
+  border-radius: 0 0 20px 20px;
+  border: 1px solid #1f1f22;
+  border-top: 0;
+  padding: 12px 14px 12px;
+  opacity: 0;
+  transform: translateY(-10px);
+  pointer-events: none;
+  transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+body.expanded .body { opacity: 1; transform: none; pointer-events: auto; }
+
+.row { display: flex; gap: 8px; }
+
+input[type="search"] {
+  flex: 1;
+  font: inherit;
+  color: #f2f2f7;
+  background: #1c1c1f;
+  border: 1px solid #2a2a2e;
+  border-radius: 9px;
+  padding: 7px 11px;
+  user-select: text;
+}
+input[type="search"]::placeholder { color: #8e8e93; }
+input[type="search"]:focus { outline: 2px solid #5e5ce6; outline-offset: -1px; }
+input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
+
+.hits {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  max-height: 168px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hits::-webkit-scrollbar { width: 6px; }
+.hits::-webkit-scrollbar-thumb { background: #2f2f33; border-radius: 3px; }
+
+.hit {
+  background: #141416;
+  border: 1px solid #232326;
+  border-radius: 9px;
+  padding: 7px 10px;
+  cursor: default;
+}
+.hit .t { font-size: 11px; color: #8e8e93; display: flex; gap: 6px; }
+.hit .b {
+  font-size: 12px;
+  margin-top: 2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  user-select: text;
+}
+
+.empty {
+  margin: 14px 0;
+  text-align: center;
+  color: #8e8e93;
+  font-size: 12px;
+}
+
+.foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 11px;
+  padding-top: 10px;
+  border-top: 1px solid #1f1f22;
+  font-size: 11px;
+  color: #8e8e93;
+}
+.foot .spacer { flex: 1; }
+
+.ghost {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: #f2f2f7;
+  background: #1c1c1f;
+  border: 1px solid #2a2a2e;
+  border-radius: 7px;
+  padding: 4px 10px;
+  cursor: default;
+}
+.ghost:hover { background: #26262a; }
+.ghost.on { background: #5e5ce6; border-color: transparent; }
+
+/* drag target */
+.drop {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.92);
+  border: 2px dashed #5e5ce6;
+  border-radius: 0 0 20px 20px;
+  font-weight: 600;
+  color: #f2f2f7;
+}
+body.dragging .drop { display: flex; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0.001ms !important; }
+}

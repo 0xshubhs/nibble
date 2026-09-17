@@ -205,6 +205,17 @@ function renderSettings(): void {
   // The Dock toggle only means anything on macOS.
   $('dock-row').hidden = m.platform !== 'darwin';
 
+  // The notch panel needs a built-in display, so it is hidden on a Mac mini
+  // or a Windows box rather than offered and then refusing to start.
+  const notch = m.notch;
+  $('notch-row').hidden = !notch?.supported;
+  if (notch?.supported) {
+    $<HTMLInputElement>('s-notch').checked = notch.enabled;
+    $('notch-note').textContent = notch.likelyNotched
+      ? 'Hangs a panel off the notch for quick search and drop-to-remember.'
+      : 'This Mac looks like it has no notch, so the panel hangs from the top of the screen instead.';
+  }
+
   $('app-name').textContent = m.name || 'Nibble';
   $('app-sub').textContent = [
     m.portable ? 'portable mode' : 'installed',
@@ -652,6 +663,10 @@ function bind(): void {
       'snoozeMinutes',
       Math.max(1, Number((e.target as HTMLInputElement).value) || 10)
     )
+  );
+
+  $('s-notch').addEventListener('change', (e) =>
+    void window.api.setNotch((e.target as HTMLInputElement).checked)
   );
 
   $('test-btn').addEventListener('click', () => void window.api.testNotification(null));

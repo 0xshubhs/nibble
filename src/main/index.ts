@@ -18,6 +18,7 @@ import * as notifier from './notifier';
 import { Memory } from './memory';
 import { CaptureManager } from './capture';
 import { McpBridge } from './mcp/server';
+import { NotchPanel, notchPaths, likelyNotched } from './notch';
 import type {
   BackendConfig,
   CaptureSourceId,
@@ -48,6 +49,7 @@ let tray: AppTray | null = null;
 let memory: Memory | null = null;
 let capture: CaptureManager | null = null;
 let mcp: McpBridge | null = null;
+let notch: NotchPanel | null = null;
 let win: BrowserWindow | null = null;
 let quitting = false;
 
@@ -185,6 +187,11 @@ function snapshot(): Snapshot {
       dataDir: dataPath().dir,
       notifications: notifier.supported(),
       relay: relayPath(),
+      notch: {
+        supported: notch?.supported() ?? false,
+        likelyNotched: likelyNotched(),
+        enabled: store.settings.notchEnabled,
+      },
     },
     memory:
       memory && capture && mcp
@@ -200,11 +207,13 @@ function snapshot(): Snapshot {
 
 function pushState(): void {
   tray?.render();
+  const state = snapshot();
   // The webContents can be torn down a beat before the window is, so checking
   // only the window logs "Render frame was disposed" noise on every quit.
   if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
-    win.webContents.send('state', snapshot());
+    win.webContents.send('state', state);
   }
+  notch?.send(state);
 }
 
 /* ---------------- reminders ---------------- */
@@ -434,6 +443,48 @@ function registerIpc(): void {
     return info ?? null;
   });
 
+  /* ---- notch panel ---- */
+
+  ipcMain.handle('notch:set', (_e, enabled: boolean) => {
+    store.setSetting('notchEnabled', Boolean(enabled));
+    if (enabled) notch?.start();
+    else notch?.stop();
+    pushState();
+    return notch?.isOpen ?? false;
+  });
+
+  ipcMain.handle('app:show-window', () => showWindow());
+
+  ipcMain.handle('memory:remember-files', async (_e, paths: string[]) => {
+    if (!memory || !Array.isArray(paths)) return 0;
+    const fs = await import('fs');
+    let n = 0;
+    for (const file of paths) {
+      if (typeof file !== 'string' || !file) continue;
+      try {
+        const stat = fs.statSync(file);
+        // Same ceiling the folder source uses, so a dropped video cannot
+        // wedge the app while it tries to read it as text.
+        if (!stat.isFile() || stat.size > 2 * 1024 * 1024) continue;
+        const text = fs.readFileSync(file, 'utf8');
+        if (text.includes(String.fromCharCode(0))) continue;
+        const res = memory.capture({
+          source: 'dropped',
+          kind: 'file',
+          text,
+          title: path.basename(file),
+          ts: stat.mtimeMs,
+          meta: { path: file },
+        });
+        if (res.added) n++;
+      } catch {
+        // Unreadable or not text; skip it rather than failing the whole drop.
+      }
+    }
+    pushState();
+    return n;
+  });
+
   ipcMain.handle('app:reveal-data', () => shell.openPath(dataPath().dir));
   ipcMain.handle('app:quit', () => {
     quitting = true;
@@ -487,10 +538,15 @@ void app.whenReady().then(() => {
     },
   });
 
+  notch = new NotchPanel({ settings: () => store.settings, ...notchPaths() });
+
   memory.on('status', () => pushState());
   memory.on('indexed', () => pushState());
   capture.on('changed', () => pushState());
-  capture.on('captured', () => pushState());
+  capture.on('captured', (e) => {
+    notch?.pulse(e.title || `${e.chunks} remembered`);
+    pushState();
+  });
 
   // The model load and the first index pass must not hold up the window or
   // the reminder scheduler, so this is deliberately not awaited.
@@ -505,6 +561,7 @@ void app.whenReady().then(() => {
           maxChunks: store.settings.maxChunks || null,
         });
       }
+      if (store.settings.notchEnabled) notch?.start();
       if (store.settings.mcpEnabled && mcp) {
         const info = await mcp.start();
         store.setSetting('mcpPort', info.port ?? store.settings.mcpPort);
@@ -551,6 +608,7 @@ app.on('before-quit', () => {
   capture?.stopAll();
   mcp?.stop();
   memory?.stop();
+  notch?.stop();
 });
 
 app.on('will-quit', () => tray?.destroy());

@@ -127,6 +127,36 @@ spawns it with a plain `node`, which cannot `require` out of a packaged asar.
 | `list_reminders` | Scheduled reminders, soonest first |
 | `add_reminder` | Schedule a notification |
 
+## The notch panel (macOS)
+
+A panel that hangs off the MacBook notch: hover it for a search box, the next
+reminder and a pause toggle, or drop text or a file on it to remember it. Off
+by default; the switch is in Settings.
+
+There is no API for any of this. macOS exposes the notch only through
+`NSScreen.safeAreaInsets`, which Electron does not surface, so the panel is a
+borderless transparent `NSPanel` pinned to the top centre of the internal
+display. Three details make it behave like part of the system:
+
+- the window level is `screen-saver`, the only level above the menu bar
+- it is visible on every space and over fullscreen apps, or it vanishes the
+  moment you switch desktops
+- collapsed, it ignores mouse events and forwards them, so the menu bar
+  underneath stays clickable, and hover is detected by polling the cursor,
+  because a window that ignores mouse events cannot receive them
+
+At rest it paints nothing at all. Drawing a collapsed lip only looks right if
+it exactly covers the physical notch, and nothing can tell us how wide that is,
+so any guess would show as black wings on one machine and a gap on another.
+
+Notch detection is a guess too, and the obvious signal does not work: a 14" M3
+reports a 29pt menu bar at one scaled resolution while an external 1080p
+display reports 30pt. It reads the model identifier instead, and the panel
+still works on a Mac without a notch, it just hangs from the top of the screen.
+
+`--notch-open` opens the panel on launch during development, since hovering
+cannot be scripted.
+
 ## Where it stores things
 
 Portable mode turns on when any of these is true, and everything lives in a
@@ -152,6 +182,7 @@ src/main/paths.ts       portable-vs-installed data directory
 src/main/autostart.ts   login items: LaunchServices / Run key / XDG autostart
 src/main/tray.ts        menu bar icon and menu
 src/main/notifier.ts    native notifications
+src/main/notch.ts       the macOS notch panel
 
 src/main/memory/        chunker, store, hybrid search, embedder
 src/main/memory/embed-worker.ts   the model, in its own process
@@ -161,6 +192,7 @@ src/mcp/stdio.ts        dependency-free relay for stdio clients
 
 src/preload.ts          the only bridge into the renderer
 src/renderer/           the window UI (no framework)
+src/renderer/notch.*    the notch panel's page, styles and script
 src/renderer/env.d.ts   ambient types; the renderer stays a script, not a module
 src/test/               store and search tests
 

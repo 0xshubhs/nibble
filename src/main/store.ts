@@ -28,6 +28,10 @@ export const DEFAULTS: StoreData = {
     mcpEnabled: false,
     mcpPort: 8787,
     mcpToken: '',
+
+    // --- notch panel ---
+    notchEnabled: false,
+    notchWidth: 200,
   },
 };
 
