@@ -1,0 +1,9 @@
+node_modules/
+dist/
+nibble-data/
+*.log
+.DS_Store
+.model-cache/
+.itest/
+.mtest/
+.seed/

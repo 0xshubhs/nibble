@@ -1,0 +1,130 @@
+appId: com.zeroxshubhs.nibble
+productName: Nibble
+copyright: Copyright © 2026 0xshubhs
+
+directories:
+  output: dist
+  buildResources: build
+
+# Ad-hoc signs unsigned macOS builds, which otherwise will not launch at all
+# on Apple silicon. Steps aside when a real Developer ID is configured.
+afterPack: scripts/adhoc-sign.js
+
+files:
+  - src/**/*
+  - assets/**/*
+  - package.json
+  - "!**/*.map"
+  # onnxruntime ships ~289MB of prebuilt binaries for every platform at once.
+  # Each build keeps only its own; the per-platform excludes are below.
+  - "!node_modules/onnxruntime-node/bin/napi-v6/*/*/!(*.node|*.dll|*.so|*.dylib)"
+
+asar: true
+# The ONNX binaries have to exist as real files for dlopen; they cannot be
+# loaded from inside the archive.
+asarUnpack:
+  - "node_modules/onnxruntime-node/bin/**"
+  # The stdio relay is spawned by a plain `node` outside Electron, which
+  # cannot read from inside the archive. It has no dependencies, so this
+  # single file is all that needs unpacking.
+  - "src/mcp/stdio.js"
+compression: maximum
+
+# ---------------- macOS ----------------
+mac:
+  category: public.app-category.productivity
+  icon: build/icon.png
+  files:
+    - "!node_modules/onnxruntime-node/bin/napi-v6/win32/**"
+    - "!node_modules/onnxruntime-node/bin/napi-v6/linux/**"
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  darkModeSupport: true
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  # Apple silicon refuses to run any unsigned binary, so an unsigned build
+  # still has to be ad-hoc signed. `null` is what tells electron-builder to
+  # do exactly that instead of leaving the bundle unsigned and unlaunchable.
+  identity: null
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    # Lets the app keep running with no windows, as a menu-bar citizen.
+    LSUIElement: false
+    NSUserNotificationAlertStyle: alert
+    # Required before macOS will even show the permission prompts for the
+    # phase-2 and phase-3 capture sources.
+    NSMicrophoneUsageDescription: >-
+      Transcribes meetings and audio on this device so you can search them later.
+      Nothing is uploaded.
+    NSScreenCaptureUsageDescription: >-
+      Reads text from your screen on this device so you can search it later.
+      Frames are discarded after reading; nothing is uploaded.
+
+dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  window:
+    width: 540
+    height: 380
+  contents:
+    - x: 140
+      y: 190
+      type: file
+    - x: 400
+      y: 190
+      type: link
+      path: /Applications
+
+# ---------------- Windows ----------------
+win:
+  icon: build/icon.png
+  files:
+    - "!node_modules/onnxruntime-node/bin/napi-v6/darwin/**"
+    - "!node_modules/onnxruntime-node/bin/napi-v6/linux/**"
+  target:
+    # `portable` is a single self-extracting .exe -- no install, no registry.
+    - target: portable
+      arch: [x64, arm64]
+    - target: nsis
+      arch: [x64]
+    - target: zip
+      arch: [x64]
+
+portable:
+  artifactName: ${productName}-${version}-portable-${arch}.${ext}
+  # Keeps the unpack directory stable so the data folder beside the exe
+  # survives between runs.
+  unpackDirName: false
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-${version}-setup-${arch}.${ext}
+  shortcutName: Nibble
+
+# ---------------- Linux ----------------
+linux:
+  icon: build/icon.png
+  files:
+    - "!node_modules/onnxruntime-node/bin/napi-v6/darwin/**"
+    - "!node_modules/onnxruntime-node/bin/napi-v6/win32/**"
+  category: Utility
+  synopsis: Portable background reminders with native notifications
+  target:
+    # AppImage is the portable one: chmod +x and run, anywhere.
+    - target: AppImage
+      arch: [x64, arm64]
+    - target: tar.gz
+      arch: [x64, arm64]
+    - target: deb
+      arch: [x64]
+  desktop:
+    entry:
+      StartupWMClass: nibble
+
+appImage:
+  artifactName: ${productName}-${version}-${arch}.${ext}

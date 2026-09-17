@@ -1,0 +1,38 @@
+{
+  "name": "nibble",
+  "productName": "Nibble",
+  "version": "0.1.0",
+  "description": "Portable, background-running cross-platform desktop app with native notifications and reminders.",
+  "main": "src/main/index.js",
+  "author": {
+    "name": "0xshubhs",
+    "email": "shubht3303@gmail.com"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/0xshubhs/dmgstarter",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/0xshubhs/dmgstarter.git"
+  },
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "icons": "node scripts/make-icons.js",
+    "pack": "electron-builder --dir",
+    "build": "electron-builder",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux",
+    "build:all": "electron-builder --mac --win --linux",
+    "test": "node test/store.test.js"
+  },
+  "devDependencies": {
+    "electron": "^32.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.3.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^3.25.76"
+  }
+}
