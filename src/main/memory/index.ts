@@ -20,6 +20,14 @@ import type {
 const BATCH = 16;
 const IDLE_MS = 120;
 
+/**
+ * The floor for "related", which compares one stored chunk against another
+ * rather than a short question against a document. Both sides are full
+ * passages here, so they sit much higher on the cosine scale than a query
+ * does, and the search floor would let in things that merely share a topic.
+ */
+const RELATED_FLOOR = 0.25;
+
 interface MemoryEvents {
   status: [StatusEvent];
   indexed: [ReturnType<MemoryStore['stats']>];
@@ -217,6 +225,27 @@ export class Memory extends EventEmitter<MemoryEvents> {
           : hit.vector !== null
             ? 'meaning'
             : 'words',
+    }));
+  }
+
+  /**
+   * Other chunks that sit near this one in the embedding space: the thread a
+   * captured thought belongs to, rather than an answer to a question.
+   *
+   * Costs nothing to ask. The vectors are already on disk, so there is no
+   * model call and no network, even with a cloud backend configured.
+   */
+  related(id: string, limit = 5): SearchHit[] {
+    return this.store.related(id, limit, RELATED_FLOOR).map((hit) => ({
+      id: hit.rec.id,
+      source: hit.rec.source,
+      kind: hit.rec.kind,
+      title: hit.rec.title,
+      text: hit.rec.text,
+      ts: hit.rec.ts,
+      meta: hit.rec.meta,
+      score: hit.score,
+      matched: 'meaning' as const,
     }));
   }
 

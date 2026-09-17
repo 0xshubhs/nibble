@@ -9,3 +9,7 @@ nibble-data/
 .seed/
 
 out/
+
+# the Next.js site
+.next/
+web/out/

@@ -192,6 +192,24 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 }
 
+/** Electron accelerators as the platform writes them on a key cap. */
+function prettyAccelerator(accel: string): string {
+  const mac = state.meta.platform === 'darwin';
+  return (accel || '')
+    .split('+')
+    .map((part) => {
+      const key = part.toLowerCase();
+      if (key === 'commandorcontrol' || key === 'cmdorctrl') return mac ? '⌘' : 'Ctrl';
+      if (key === 'command' || key === 'cmd') return '⌘';
+      if (key === 'control' || key === 'ctrl') return mac ? '⌃' : 'Ctrl';
+      if (key === 'alt' || key === 'option') return mac ? '⌥' : 'Alt';
+      if (key === 'shift') return mac ? '⇧' : 'Shift';
+      if (key === 'super' || key === 'meta') return mac ? '⌘' : 'Win';
+      return part.length === 1 ? part.toUpperCase() : part;
+    })
+    .join(mac ? '' : '+');
+}
+
 function renderSettings(): void {
   const s = state.settings;
   const m = state.meta;
@@ -214,6 +232,22 @@ function renderSettings(): void {
     $('notch-note').textContent = notch.likelyNotched
       ? 'Hangs a panel off the notch for quick search and drop-to-remember.'
       : 'This Mac looks like it has no notch, so the panel hangs from the top of the screen instead.';
+  }
+
+  // The hotkey row reports what the OS actually accepted, not what the
+  // setting asks for: another app may already own the combination.
+  const quick = m.quickCapture;
+  if (quick) {
+    $<HTMLInputElement>('s-quick').checked = quick.enabled;
+    $('quick-key').textContent = prettyAccelerator(quick.accelerator);
+    const badge = $('quick-badge');
+    const clash = quick.enabled && !quick.registered;
+    badge.hidden = !clash;
+    badge.textContent = 'not registered';
+    $('quick-note').classList.toggle('is-warn', clash);
+    $('quick-why').textContent = clash
+      ? (quick.error ?? 'Another app already owns that combination.')
+      : '';
   }
 
   $('app-name').textContent = m.name || 'Nibble';
@@ -291,6 +325,64 @@ function highlight(container: HTMLElement, text: string, query: string): void {
   if (last < text.length) container.append(text.slice(last));
 }
 
+/**
+ * Opens the nearest neighbours of one result underneath it.
+ *
+ * This is the part of the index you otherwise never see: the vectors are
+ * already on disk, so following a thought to whatever sits next to it costs
+ * nothing and works offline, even with no query at all.
+ */
+async function toggleRelated(li: HTMLElement, hit: AppHit, btn: HTMLButtonElement): Promise<void> {
+  const open = li.querySelector('.related');
+  if (open) {
+    open.remove();
+    btn.textContent = 'Related';
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Looking…';
+  const near = await window.api.relatedMemory(hit.id, 4);
+  btn.disabled = false;
+
+  // The user can close the result, or search again, while this is in flight.
+  if (!li.isConnected) return;
+  btn.textContent = 'Hide related';
+
+  const box = document.createElement('div');
+  box.className = 'related';
+
+  const head = document.createElement('div');
+  head.className = 'related-head';
+  head.textContent = near.length
+    ? 'Closest in meaning'
+    : 'Nothing else is close to this yet';
+  box.append(head);
+
+  for (const r of near) {
+    const row = document.createElement('div');
+    row.className = 'rel';
+
+    const sim = document.createElement('span');
+    sim.className = 'pill sim';
+    sim.textContent = `${Math.round(r.score * 100)}%`;
+
+    const body = document.createElement('div');
+    body.className = 'rel-body';
+    if (r.title) {
+      const t = document.createElement('b');
+      t.textContent = `${r.title} `;
+      body.append(t);
+    }
+    body.append(r.text);
+
+    row.append(sim, body);
+    box.append(row);
+  }
+
+  li.append(box);
+}
+
 function renderHits(): void {
   const list = $('m-results');
   const empty = $('m-empty');
@@ -344,13 +436,19 @@ function renderHits(): void {
       when.textContent = ago(h.ts);
       const spacer = document.createElement('span');
       spacer.className = 'spacer';
+
+      const rel = document.createElement('button');
+      rel.className = 'btn btn-sm';
+      rel.textContent = 'Related';
+      rel.addEventListener('click', () => void toggleRelated(li, h, rel));
+
       const forget = document.createElement('button');
-      forget.className = 'btn btn-quiet';
+      forget.className = 'btn btn-sm btn-quiet';
       forget.textContent = 'Forget';
       forget.addEventListener('click', () => {
         void window.api.forget(h.id).then(runSearch);
       });
-      foot.append(when, spacer, forget);
+      foot.append(when, spacer, rel, forget);
 
       li.append(head, body, foot);
       return li;
@@ -667,6 +765,9 @@ function bind(): void {
 
   $('s-notch').addEventListener('change', (e) =>
     void window.api.setNotch((e.target as HTMLInputElement).checked)
+  );
+  $('s-quick').addEventListener('change', (e) =>
+    void window.api.setSetting('quickCaptureEnabled', (e.target as HTMLInputElement).checked)
   );
 
   $('test-btn').addEventListener('click', () => void window.api.testNotification(null));

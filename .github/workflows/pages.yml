@@ -1,6 +1,6 @@
 name: pages
 
-# Publishes site/ to GitHub Pages.
+# Builds the site in web/ and publishes it to GitHub Pages.
 #
 # Manual on purpose: running it makes the page public. Turn Pages on first
 # (Settings -> Pages -> Source: GitHub Actions), then run this workflow --
@@ -23,21 +23,34 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
     steps:
       - uses: actions/checkout@v4
 
-      - name: Assemble the site
-        run: |
-          mkdir -p _site/assets
-          cp site/index.html _site/
-          cp assets/icon.png _site/assets/
-          # The page links ../assets/icon.png; flatten it for Pages.
-          sed -i 's#\.\./assets/icon\.png#assets/icon.png#' _site/index.html
-          touch _site/.nojekyll
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+
+      - name: Build the static export
+        # A project site is served from /<repo>, so the base path has to match
+        # or every asset 404s. Reading it from the repository name means a
+        # fork or a rename keeps working with no edit here.
+        env:
+          NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
+        run: npm run build
+
+      - name: Stop Pages from running Jekyll over the export
+        run: touch out/.nojekyll
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: _site
+          path: web/out
       - id: deploy
         uses: actions/deploy-pages@v4

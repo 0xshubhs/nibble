@@ -2,7 +2,9 @@ import path from 'path';
 import {
   app,
   BrowserWindow,
+  clipboard,
   dialog,
+  globalShortcut,
   ipcMain,
   nativeTheme,
   powerMonitor,
@@ -19,6 +21,8 @@ import { Memory } from './memory';
 import { CaptureManager } from './capture';
 import { McpBridge } from './mcp/server';
 import { NotchPanel, notchPaths, likelyNotched } from './notch';
+import { QuickCapture, DEFAULT_SHORTCUT } from './quickcapture';
+import { isSecret } from './capture/clipboard';
 import type {
   BackendConfig,
   CaptureSourceId,
@@ -50,6 +54,7 @@ let memory: Memory | null = null;
 let capture: CaptureManager | null = null;
 let mcp: McpBridge | null = null;
 let notch: NotchPanel | null = null;
+let quick: QuickCapture | null = null;
 let win: BrowserWindow | null = null;
 let quitting = false;
 
@@ -63,7 +68,7 @@ function createWindow({ show }: { show: boolean }): BrowserWindow {
     minHeight: 460,
     show: false,
     title: app.getName(),
-    backgroundColor: nativeTheme.shouldUseDarkColors ? '#14141b' : '#f6f6fa',
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#000000' : '#ffffff',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
     icon: path.join(__dirname, '..', '..', 'assets', 'icon.png'),
     webPreferences: {
@@ -192,6 +197,12 @@ function snapshot(): Snapshot {
         likelyNotched: likelyNotched(),
         enabled: store.settings.notchEnabled,
       },
+      quickCapture: quick?.state() ?? {
+        enabled: false,
+        accelerator: store.settings.quickCaptureShortcut || DEFAULT_SHORTCUT,
+        registered: false,
+        error: null,
+      },
     },
     memory:
       memory && capture && mcp
@@ -255,6 +266,72 @@ function saveReminder(input: ReminderInput): Reminder {
   scheduler.tick();
   pushState();
   return reminder;
+}
+
+/* ---------------- quick capture ---------------- */
+
+/** A bare notification with no reminder behind it. */
+function toast(title: string, body: string): void {
+  notifier.fire({ title, body }, {
+    sound: false,
+    snoozeMinutes: store.settings.snoozeMinutes,
+    onOpen: () => showWindow(),
+    onSnooze: () => undefined,
+  });
+}
+
+/**
+ * The hotkey: remember whatever is on the clipboard, right now.
+ *
+ * This is the deliberate counterpart to the clipboard source. That one is
+ * ambient and stores everything while it runs; this stores exactly one thing,
+ * because you asked for it, with nothing watching in between.
+ */
+function rememberClipboard(): void {
+  if (!memory) return;
+
+  let text = '';
+  try {
+    text = clipboard.readText() ?? '';
+  } catch {
+    text = ''; // another app is holding the pasteboard
+  }
+  text = text.trim();
+
+  // Nothing worth storing: open the window rather than fail silently, since
+  // the key press has to do something visible.
+  if (text.length < 8) {
+    showWindow();
+    return;
+  }
+
+  // Pause means nothing is stored. A hotkey is explicit, but someone who
+  // paused capture to handle something sensitive is owed the stronger
+  // reading, so say no out loud instead of making an exception.
+  if (capture?.paused) {
+    toast('Capture is paused', 'Nothing was stored. Resume capture in the Memory tab.');
+    return;
+  }
+
+  if (isSecret(text)) {
+    toast('Not remembered', 'That looked like a password or a key.');
+    return;
+  }
+
+  const title = text.split('\n')[0].slice(0, 80);
+  const res = memory.capture({ source: 'quick', kind: 'clipboard', text, title });
+  if (res.added) {
+    notch?.pulse('Remembered');
+    toast('Remembered', title);
+  } else {
+    toast('Already remembered', 'That is the same thing you saved a moment ago.');
+  }
+  pushState();
+}
+
+/** Keeps the OS registration in step with the two settings that drive it. */
+function syncQuickCapture(): void {
+  quick?.apply(store.settings.quickCaptureEnabled, store.settings.quickCaptureShortcut);
 }
 
 /* ---------------- ipc ---------------- */
@@ -321,6 +398,7 @@ function registerIpc(): void {
         // Keep the login item's --hidden flag in step with the preference.
         autostart.setEnabled(true, { hidden: Boolean(value) });
       }
+      if (key === 'quickCaptureEnabled' || key === 'quickCaptureShortcut') syncQuickCapture();
     }
     pushState();
     return snapshot().settings;
@@ -333,6 +411,9 @@ function registerIpc(): void {
   );
   ipcMain.handle('memory:recent', (_e, limit?: number, source?: string | null) =>
     memory?.recent(limit ?? 20, source ?? null) ?? []
+  );
+  ipcMain.handle('memory:related', (_e, id: string, limit?: number) =>
+    memory?.related(id, limit ?? 5) ?? []
   );
   ipcMain.handle('memory:stats', () => memory?.stats() ?? null);
 
@@ -511,9 +592,12 @@ void app.whenReady().then(() => {
   });
   scheduler.on('changed', () => pushState());
 
+  quick = new QuickCapture(() => rememberClipboard());
+
   tray = new AppTray({
     store,
     onShow: (id) => showWindow(id),
+    onQuickCapture: () => rememberClipboard(),
     onQuit: () => {
       quitting = true;
       app.quit();
@@ -562,6 +646,7 @@ void app.whenReady().then(() => {
         });
       }
       if (store.settings.notchEnabled) notch?.start();
+      syncQuickCapture();
       if (store.settings.mcpEnabled && mcp) {
         const info = await mcp.start();
         store.setSetting('mcpPort', info.port ?? store.settings.mcpPort);
@@ -609,6 +694,12 @@ app.on('before-quit', () => {
   mcp?.stop();
   memory?.stop();
   notch?.stop();
+  quick?.stop();
 });
 
-app.on('will-quit', () => tray?.destroy());
+app.on('will-quit', () => {
+  tray?.destroy();
+  // Electron does this on exit anyway; being explicit means a hotkey cannot
+  // outlive the app if something else keeps the process alive.
+  globalShortcut.unregisterAll();
+});

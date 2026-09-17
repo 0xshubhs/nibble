@@ -453,6 +453,36 @@ export class MemoryStore {
       .slice(0, k);
   }
 
+  /**
+   * Nearest neighbours of a chunk that is already stored.
+   *
+   * The row's own vector is the query, so this costs no embedding call at all
+   * and keeps working while the model is downloading -- an unembedded row
+   * simply has no neighbours yet.
+   *
+   * Chunks split from the same capture are dropped. They are the rest of the
+   * same paragraph, they always score highest, and they would fill the list
+   * with text the reader is already looking at.
+   */
+  related(id: string, k = 5, floor = MIN_COSINE): Scored[] {
+    const rec = this.byId.get(id);
+    if (!rec || !rec.embedded || this.deleted.has(rec.row)) return [];
+
+    const query = this.vecs.subarray(rec.row * this.dim, (rec.row + 1) * this.dim);
+    const sameCapture = id.includes('_') ? `${id.slice(0, id.lastIndexOf('_'))}_` : null;
+
+    const out: Scored[] = [];
+    // Over-fetch, because the siblings dropped below come off the top.
+    for (const [row, score] of this.vectorSearch(query, k + 12, floor)) {
+      const hit = this.rows[row];
+      if (hit.row === rec.row) continue;
+      if (sameCapture && hit.id.startsWith(sameCapture)) continue;
+      out.push({ rec: hit, score, keyword: null, vector: score });
+      if (out.length >= k) break;
+    }
+    return out;
+  }
+
   recent(limit = 20, source: string | null = null): MemoryRecord[] {
     const out: MemoryRecord[] = [];
     for (let i = this.rows.length - 1; i >= 0 && out.length < limit; i--) {

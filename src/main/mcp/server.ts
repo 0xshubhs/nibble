@@ -149,7 +149,12 @@ export class McpBridge {
             .map((h, i) => {
               const when = new Date(h.ts).toISOString().slice(0, 16).replace('T', ' ');
               const head = h.title ? `${h.title}: ` : '';
-              return `[${i + 1}] ${head}${h.source}, ${when} (matched on ${h.matched})\n${excerpt(h.text)}`;
+              // The id is printed so the model can follow a result into
+              // related_memory without a second search.
+              return (
+                `[${i + 1}] ${head}${h.source}, ${when} (matched on ${h.matched}, id ${h.id})\n` +
+                excerpt(h.text)
+              );
             })
             .join('\n\n')
         );
@@ -206,6 +211,42 @@ export class McpBridge {
         });
         if (!res.added) return text(`Not stored (${res.skipped}).`);
         return text(`Stored ${res.added} chunk${res.added === 1 ? '' : 's'}.`);
+      }
+    );
+
+    tool(
+      mcp,
+      'related_memory',
+      {
+        title: 'Related memory',
+        description:
+          'Other things the user captured that sit near a given result in meaning, even when ' +
+          'they share no words with it. Pass the id printed by search_memory. Use it to follow ' +
+          'a thread: what else was going on around this decision, note or link.',
+        inputSchema: {
+          id: z.string().describe('The id of a chunk, as printed by search_memory'),
+          limit: z.number().int().min(1).max(15).optional().describe('How many (default 5)'),
+        },
+      },
+      async ({ id, limit }) => {
+        note('related_memory', { id, limit });
+        const hits = this.memory.related(id, limit ?? 5);
+        if (!hits.length) {
+          return text(
+            `Nothing related to ${id}. Either it is not indexed yet, the id is wrong, or ` +
+              'nothing else in the memory is close enough to it.'
+          );
+        }
+        return text(
+          hits
+            .map((h, i) => {
+              const when = new Date(h.ts).toISOString().slice(0, 16).replace('T', ' ');
+              const head = h.title ? `${h.title}: ` : '';
+              const pct = Math.round(h.score * 100);
+              return `[${i + 1}] ${head}${h.source}, ${when} (${pct}% similar, id ${h.id})\n${excerpt(h.text, 400)}`;
+            })
+            .join('\n\n')
+        );
       }
     );
 

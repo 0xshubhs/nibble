@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { EventEmitter } from 'events';
 import { dataPath } from './paths';
+import { DEFAULT_SHORTCUT } from './quickcapture';
 import type { Reminder, Settings, StoreData } from '../types';
 
 export const DEFAULTS: StoreData = {
@@ -28,6 +29,10 @@ export const DEFAULTS: StoreData = {
     mcpEnabled: false,
     mcpPort: 8787,
     mcpToken: '',
+
+    // --- quick capture ---
+    quickCaptureEnabled: false,
+    quickCaptureShortcut: DEFAULT_SHORTCUT,
 
     // --- notch panel ---
     notchEnabled: false,

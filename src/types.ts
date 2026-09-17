@@ -65,6 +65,10 @@ export interface Settings {
   mcpPort: number;
   mcpToken: string;
 
+  /** Global hotkey that remembers whatever is on the clipboard. */
+  quickCaptureEnabled: boolean;
+  quickCaptureShortcut: string;
+
   /** macOS only: the panel that hangs off the notch. */
   notchEnabled: boolean;
   /**
@@ -280,6 +284,18 @@ export interface NotchCapability {
   enabled: boolean;
 }
 
+/**
+ * The global hotkey's real state. `registered` is what the OS accepted, not
+ * what the setting asks for: another app may already own the combination, and
+ * the UI has to be able to say so instead of showing a switch that lies.
+ */
+export interface QuickCaptureState {
+  enabled: boolean;
+  accelerator: string;
+  registered: boolean;
+  error: string | null;
+}
+
 export interface AppMeta {
   version: string;
   name: string;
@@ -290,6 +306,7 @@ export interface AppMeta {
   /** Absolute path to the stdio relay, for the connect instructions. */
   relay: string;
   notch: NotchCapability;
+  quickCapture: QuickCaptureState;
 }
 
 export interface MemoryView {
@@ -337,6 +354,7 @@ export interface RendererApi {
 
   searchMemory(query: string, opts?: SearchOptions): Promise<SearchHit[]>;
   recentMemory(limit?: number, source?: string | null): Promise<SearchHit[]>;
+  relatedMemory(id: string, limit?: number): Promise<SearchHit[]>;
   memoryStats(): Promise<MemoryStatsWithEmbedder>;
   captureNote(item: { text: string; title?: string }): Promise<CaptureResult>;
   forget(id: string): Promise<boolean>;

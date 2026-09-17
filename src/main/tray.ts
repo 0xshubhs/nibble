@@ -36,6 +36,7 @@ export interface TrayHandlers {
   onShow(id?: string): void;
   onQuit(): void;
   onSnooze(id: string, minutes: number): void;
+  onQuickCapture(): void;
 }
 
 /**
@@ -82,6 +83,12 @@ export class AppTray {
       { type: 'separator' },
       { label: 'Open window', click: () => this.deps.onShow() },
       { label: 'New reminder…', click: () => this.deps.onShow('new') },
+      {
+        label: store.settings.quickCaptureEnabled
+          ? `Remember the clipboard (${store.settings.quickCaptureShortcut})`
+          : 'Remember the clipboard',
+        click: () => this.deps.onQuickCapture(),
+      },
       { type: 'separator' },
       {
         label: dataPath().portable ? 'Show data folder (portable)' : 'Show data folder',

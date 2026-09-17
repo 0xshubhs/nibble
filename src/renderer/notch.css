@@ -1,5 +1,9 @@
 /* The panel is drawn entirely in black so it merges with the notch. Only the
-   expanded body has any visible edge. */
+   expanded body has any visible edge.
+
+   Its colours are literals rather than tokens: the panel hangs off a black
+   physical notch in both themes, so it must not invert when the rest of the
+   system does. The type, the radii and the shapes still come from tokens.css. */
 
 * { box-sizing: border-box; }
 
@@ -8,10 +12,14 @@ html, body {
   height: 100%;
   background: transparent;
   overflow: hidden;
-  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
-  color: #f2f2f7;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: #f5f5f7;
   cursor: default;
   user-select: none;
+  -webkit-font-smoothing: antialiased;
 }
 
 .shell {
@@ -36,7 +44,7 @@ html, body {
   width: var(--notch-w, 200px);
   height: var(--menubar-h, 32px);
   background: transparent;
-  border-radius: 0 0 12px 12px;
+  border-radius: 0 0 var(--radius-input) var(--radius-input);
   transition: width 0.22s cubic-bezier(0.22, 1, 0.36, 1), background 0.18s ease;
   display: flex;
   align-items: center;
@@ -48,14 +56,22 @@ body.expanded .lip { width: 100%; border-radius: 0; background: #000; }
 body.pulsing .lip { background: #000; }
 
 .dot {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: #30d158;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ffffff;
   opacity: 0;
   transition: opacity 0.2s ease;
 }
 .lip-text {
-  font-size: 11px; font-weight: 600; letter-spacing: 0.01em;
-  color: #f2f2f7; opacity: 0; max-width: 0; overflow: hidden; white-space: nowrap;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #f5f5f7;
+  opacity: 0;
+  max-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
   transition: opacity 0.2s ease, max-width 0.22s ease;
 }
 body.pulsing .dot { opacity: 1; }
@@ -65,10 +81,10 @@ body.pulsing .lip-text { opacity: 1; max-width: 150px; }
 .body {
   width: 100%;
   background: #000;
-  border-radius: 0 0 20px 20px;
+  border-radius: 0 0 var(--radius-xl) var(--radius-xl);
   border: 1px solid #1f1f22;
   border-top: 0;
-  padding: 12px 14px 12px;
+  padding: 13px 14px;
   opacity: 0;
   transform: translateY(-10px);
   pointer-events: none;
@@ -78,18 +94,24 @@ body.expanded .body { opacity: 1; transform: none; pointer-events: auto; }
 
 .row { display: flex; gap: 8px; }
 
-input[type="search"] {
+input[type='search'] {
   flex: 1;
   font: inherit;
-  color: #f2f2f7;
-  background: #1c1c1f;
-  border: 1px solid #2a2a2e;
-  border-radius: 9px;
-  padding: 7px 11px;
+  font-weight: 500;
+  color: #f5f5f7;
+  background: #141416;
+  border: 1px solid #262629;
+  border-radius: var(--radius-full);
+  padding: 8px 14px;
   user-select: text;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
-input[type="search"]::placeholder { color: #8e8e93; }
-input[type="search"]:focus { outline: 2px solid #5e5ce6; outline-offset: -1px; }
+input[type='search']::placeholder { color: #6e6e78; }
+input[type='search']:focus {
+  outline: none;
+  border-color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.25);
+}
 input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
 
 .hits {
@@ -108,14 +130,20 @@ input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
 .hit {
   background: #141416;
   border: 1px solid #232326;
-  border-radius: 9px;
-  padding: 7px 10px;
+  border-radius: var(--radius-input);
+  padding: 8px 11px;
   cursor: default;
 }
-.hit .t { font-size: 11px; color: #8e8e93; display: flex; gap: 6px; }
+.hit .t {
+  font-size: 11px;
+  font-weight: 700;
+  color: #9b9ba7;
+  display: flex;
+  gap: 6px;
+}
 .hit .b {
   font-size: 12px;
-  margin-top: 2px;
+  margin-top: 3px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -126,7 +154,7 @@ input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
 .empty {
   margin: 14px 0;
   text-align: center;
-  color: #8e8e93;
+  color: #6e6e78;
   font-size: 12px;
 }
 
@@ -138,23 +166,24 @@ input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
   padding-top: 10px;
   border-top: 1px solid #1f1f22;
   font-size: 11px;
-  color: #8e8e93;
+  color: #9b9ba7;
 }
 .foot .spacer { flex: 1; }
 
 .ghost {
   font: inherit;
   font-size: 11px;
-  font-weight: 600;
-  color: #f2f2f7;
+  font-weight: 700;
+  color: #f5f5f7;
   background: #1c1c1f;
-  border: 1px solid #2a2a2e;
-  border-radius: 7px;
-  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-full);
+  padding: 5px 12px;
   cursor: default;
+  transition: background 0.15s ease;
 }
 .ghost:hover { background: #26262a; }
-.ghost.on { background: #5e5ce6; border-color: transparent; }
+.ghost.on { background: #ffffff; color: #000000; border-color: #ffffff; }
 
 /* drag target */
 .drop {
@@ -164,10 +193,10 @@ input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
   align-items: center;
   justify-content: center;
   background: rgba(0, 0, 0, 0.92);
-  border: 2px dashed #5e5ce6;
-  border-radius: 0 0 20px 20px;
-  font-weight: 600;
-  color: #f2f2f7;
+  border: 2px dashed #ffffff;
+  border-radius: 0 0 var(--radius-xl) var(--radius-xl);
+  font-weight: 700;
+  color: #f5f5f7;
 }
 body.dragging .drop { display: flex; }
 

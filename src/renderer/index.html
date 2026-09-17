@@ -4,9 +4,10 @@
     <meta charset="utf-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:;"
     />
     <title>Nibble</title>
+    <link rel="stylesheet" href="tokens.css" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -196,6 +197,17 @@
               <p id="notch-note">Hangs a panel off the notch for quick search and drop-to-remember.</p>
             </div>
             <label class="switch"><input type="checkbox" id="s-notch" /><span></span></label>
+          </li>
+          <li id="quick-row">
+            <div>
+              <strong>Quick capture<span class="badge warn" id="quick-badge" hidden></span></strong>
+              <p id="quick-note">
+                Press <kbd id="quick-key">⌘⇧M</kbd> anywhere to remember whatever is on your
+                clipboard. Nothing is watched in between.
+              </p>
+              <p class="warn-note" id="quick-why"></p>
+            </div>
+            <label class="switch"><input type="checkbox" id="s-quick" /><span></span></label>
           </li>
           <li id="dock-row">
             <div>

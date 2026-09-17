@@ -34,6 +34,8 @@ three natively and attaches the results to a GitHub release when you push a tag.
 | | |
 |---|---|
 | **Memory** | Captures text, chunks it, embeds it on device, and searches it by keyword *and* meaning |
+| **Related** | Any result opens its nearest neighbours in meaning, with no query and no model call |
+| **Quick capture** | One global hotkey stores the clipboard on purpose, with nothing watching in between |
 | **MCP connector** | Claude, ChatGPT or any MCP client can query that memory as a tool |
 | **Reminders** | Once, hourly, daily, weekdays, weekly, or a custom interval |
 | **Portable** | Data lives beside the executable, not in your profile |
@@ -82,12 +84,27 @@ and the reminder timers. Switching backends invalidates the stored vectors and
 re-embeds in the background, because vectors from different models are not
 comparable even at the same width.
 
+### Related
+
+`related()` answers a different question from search: not "what matches this
+query", but "what else is near this". The stored chunk's own vector is the
+query, so it costs no embedding call, works offline, and is instant even with
+a cloud backend configured.
+
+Two details make the results worth reading. The floor is 0.25 rather than the
+search floor of 0.1, because both sides are full passages here rather than a
+short question and so sit higher on the cosine scale. And chunks split from
+the same original capture are dropped: they are the rest of the same
+paragraph, they always score highest, and they would fill the list with text
+you are already looking at.
+
 ## Capture sources
 
 | Source | Status | What it does |
 |---|---|---|
 | **Clipboard** | live | Remembers what you copy. Drops anything matching a credential shape or a high-entropy blob before storing it |
 | **Folders** | live | Reads text and Markdown from folders you choose, and notices changes |
+| **Quick capture** | live | A global hotkey (`⌘⇧M` / `Ctrl+Shift+M`) that stores the clipboard once, deliberately |
 | **Meetings & audio** | phase 2 | Permission handling is real; capture is not wired up yet |
 | **Screen** | phase 3 | Same. The most invasive source, so it ships last and with the strictest treatment |
 
@@ -96,6 +113,19 @@ state. They say they are not capturing rather than implying that they are.
 
 There is a global **pause** that keeps sources running but stores nothing, and a
 **forget** on every result and every source.
+
+### Quick capture
+
+The clipboard source is ambient: while it runs, everything you copy is stored.
+The hotkey is the opposite trade -- nothing is watched, and one key press
+stores one thing. Both can be on at once.
+
+It refuses in four cases, and says which: nothing useful on the clipboard (it
+opens the window instead), capture is paused, the text looks like a
+credential, or you saved the same thing within the last six hours. Registering
+a global shortcut can also simply fail, because whichever app asks first owns
+the combination, so Settings shows **not registered** rather than a switch
+that claims to be on.
 
 ## Connecting an LLM
 
@@ -120,7 +150,8 @@ spawns it with a plain `node`, which cannot `require` out of a packaged asar.
 
 | Tool | |
 |---|---|
-| `search_memory` | Keyword + semantic search, with source and date filters |
+| `search_memory` | Keyword + semantic search, with source and date filters. Prints each chunk's id |
+| `related_memory` | The nearest neighbours of a chunk, by meaning, from an id `search_memory` printed |
 | `recent_memory` | Newest captures first |
 | `remember` | Store something from the conversation |
 | `memory_stats` | Counts, model, index state |
@@ -183,6 +214,7 @@ src/main/autostart.ts   login items: LaunchServices / Run key / XDG autostart
 src/main/tray.ts        menu bar icon and menu
 src/main/notifier.ts    native notifications
 src/main/notch.ts       the macOS notch panel
+src/main/quickcapture.ts the global hotkey
 
 src/main/memory/        chunker, store, hybrid search, embedder
 src/main/memory/embed-worker.ts   the model, in its own process
@@ -192,14 +224,17 @@ src/mcp/stdio.ts        dependency-free relay for stdio clients
 
 src/preload.ts          the only bridge into the renderer
 src/renderer/           the window UI (no framework)
+src/renderer/tokens.css the design tokens, shared by both windows
 src/renderer/notch.*    the notch panel's page, styles and script
 src/renderer/env.d.ts   ambient types; the renderer stays a script, not a module
 src/test/               store and search tests
 
-scripts/make-icons.js   generates the mouse mascot from code, no image deps
+scripts/make-icons.js   generates the mark from code, no image deps
 scripts/adhoc-sign.js   ad-hoc signs unsigned macOS builds so they will launch
 scripts/copy-assets.js  the renderer's html/css, which tsc does not emit
-site/                   the landing page
+assets/fonts/           Satoshi, bundled so the app never fetches a font
+web/                    the website (Next.js, static export)
+site/index.html         the same story in one file, for a no-build preview
 ```
 
 `RendererApi` in `src/types.ts` is implemented by `src/preload.ts` and declared
@@ -236,12 +271,41 @@ The product name appears in `package.json` (`productName`), `electron-builder.ym
 `site/index.html`. The data folder name is the `FOLDER` constant in
 `src/main/paths.js`.
 
-## Publishing the site
+## The website
 
-The landing page lives in `site/index.html`. `.github/workflows/pages.yml`
-deploys it, but it only runs when you trigger it, because deploying makes the page
-public. Turn Pages on under **Settings → Pages → Source: GitHub Actions**, then
-run the **pages** workflow.
+The site lives in `web/`: a Next.js app exported to static files, because
+documentation for a desktop app has nothing to run on a server.
+
+```
+cd web
+npm install
+npm run dev      # http://localhost:3000
+npm run build    # static export into web/out
+```
+
+`.github/workflows/pages.yml` builds and deploys it, and only runs when you
+trigger it, because deploying makes the page public. Turn Pages on under
+**Settings → Pages → Source: GitHub Actions**, then run the **pages** workflow.
+It sets `NEXT_PUBLIC_BASE_PATH` from the repository name, since a project site
+is served from `/<repo>` and every asset would otherwise 404.
+
+`site/index.html` is the same story in one self-contained file, with no build
+step, for opening straight off disk.
+
+## The design
+
+The window, the notch panel and the site all draw from one vocabulary: the ENS
+design system ([Thorin](https://github.com/ensdomains/thorin)) in strict black
+and white, with the edges left hard. Satoshi as the typeface, Thorin's
+component shapes -- pill buttons, tag pills, switches, segmented tabs -- and no
+colour anywhere: every state is a fill or a stroke, so it survives a monochrome
+screen and a colour-blind reader alike.
+
+The tokens are defined twice, once in `src/renderer/tokens.css` for the app and
+once in `web/app/globals.css` for the site, because the two have no build step
+in common. Satoshi is bundled in `assets/fonts/` rather than fetched from a CDN:
+an app that promises nothing leaves the device should not open a connection to
+someone else's server to draw its own text.
 
 ## License
 

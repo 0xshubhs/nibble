@@ -113,6 +113,37 @@ import { MIN_COSINE } from '../main/memory/store';
 ok('cosine floor is above measured unrelated pairs', MIN_COSINE > 0.04, String(MIN_COSINE));
 ok('cosine floor is below measured related pairs', MIN_COSINE < 0.12, String(MIN_COSINE));
 
+// related: nearest neighbours of a stored row, with siblings excluded
+const relDir = fs.mkdtempSync(path.join(os.tmpdir(), 'memrel-'));
+const rel = new MemoryStore(relDir, DIM).load();
+rel.add([
+  rec('aaa_0', 'files', 'Deploy', 'Rotate the staging credentials every ninety days.'),
+  rec('aaa_1', 'files', 'Deploy', 'Whoever is on call does the rotation.'),
+  rec('bbb_0', 'clipboard', '', 'Credential rotation policy for the staging environment.'),
+  rec('ccc_0', 'notes', '', 'The cat sat on the mat.'),
+]);
+rel.setVector(0, V(1, 0, 0, 0));
+rel.setVector(1, V(1, 0, 0, 0)); // a sibling chunk of the same capture
+rel.setVector(2, V(0.9, 0.44, 0, 0));
+rel.setVector(3, V(0, 1, 0, 0));
+
+const near = rel.related('aaa_0', 5);
+ok('related drops the row itself', !near.some((h) => h.rec.id === 'aaa_0'));
+ok(
+  'related drops siblings from the same capture',
+  !near.some((h) => h.rec.id === 'aaa_1'),
+  near.map((h) => h.rec.id).join()
+);
+ok('related finds the near one', near[0]?.rec.id === 'bbb_0', near.map((h) => h.rec.id).join());
+ok('related drops what is below the floor', !near.some((h) => h.rec.id === 'ccc_0'));
+ok('related scores are cosines', (near[0]?.score ?? 0) > 0.85, String(near[0]?.score));
+ok('related on an unknown id is empty', rel.related('nope', 5).length === 0);
+
+rel.add([rec('ddd_0', 'notes', '', 'Something captured but not embedded yet.')]);
+ok('related on an unembedded row is empty', rel.related('ddd_0', 5).length === 0);
+rel.close();
+fs.rmSync(relDir, { recursive: true, force: true });
+
 // prune
 s3.add([rec('old', 'x', '', 'an ancient note from long ago')]);
 const oldRec = s3.byId.get('old');

@@ -1,0 +1,85 @@
+/* ============================================================
+   Design tokens: the ENS design system (Thorin) in strict black
+   and white, with the edges left hard.
+   https://github.com/ensdomains/thorin
+
+   The window, the notch panel and the website all draw from this
+   one vocabulary: Satoshi, Thorin's component shapes -- pill
+   buttons, tag pills, switches -- and no colour at all. Contrast
+   does the work colour usually does, borders are 2px, and a
+   shadow is an offset block rather than a blur.
+
+   Light is the base; dark inverts the values, never the structure.
+   ============================================================ */
+
+/* Satoshi is the ENS typeface. Bundled rather than fetched, because an
+   app that promises nothing leaves the device cannot open a CDN
+   connection to draw its own text. One variable file covers 300-900. */
+@font-face {
+  font-family: 'Satoshi';
+  src: url('../../assets/fonts/Satoshi-Variable.woff2') format('woff2-variations');
+  font-weight: 300 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* ---- ink and paper ---- */
+  --ink: #000000;
+  --paper: #ffffff;
+
+  /* ---- surfaces ---- */
+  --bg: #ffffff;
+  --bg-sunken: #f2f2f2;
+  --surface: #ffffff;
+  --surface-secondary: #f2f2f2;
+  --surface-hover: #e4e4e4;
+  --border: #000000;
+  --border-soft: #d4d4d4;
+
+  --text: #000000;
+  --text-secondary: #4a4a4a;
+  --text-tertiary: #767676;
+
+  /* ---- radii: barely rounded, except the pills ---- */
+  --radius-sm: 2px;
+  --radius: 4px;
+  --radius-input: 4px;
+  --radius-card: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 8px;
+  --radius-full: 9999px;
+
+  /* ---- edges ---- */
+  --line: 2px;
+  --shadow-sm: 3px 3px 0 var(--ink);
+  --shadow: 5px 5px 0 var(--ink);
+  --ring: 0 0 0 3px rgba(0, 0, 0, 0.2);
+
+  /* ---- type ---- */
+  --font: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'iA Writer Mono', ui-monospace, SFMono-Regular, Menlo, Consolas,
+    'Liberation Mono', monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #ffffff;
+    --paper: #000000;
+
+    --bg: #000000;
+    --bg-sunken: #0d0d0d;
+    --surface: #000000;
+    --surface-secondary: #151515;
+    --surface-hover: #242424;
+    --border: #ffffff;
+    --border-soft: #333333;
+
+    --text: #ffffff;
+    --text-secondary: #b6b6b6;
+    --text-tertiary: #8a8a8a;
+
+    --ring: 0 0 0 3px rgba(255, 255, 255, 0.25);
+  }
+}

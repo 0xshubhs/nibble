@@ -23,6 +23,7 @@ const api: RendererApi = {
   // --- memory ---
   searchMemory: (query, opts) => ipcRenderer.invoke('memory:search', query, opts),
   recentMemory: (limit, source) => ipcRenderer.invoke('memory:recent', limit, source),
+  relatedMemory: (id, limit) => ipcRenderer.invoke('memory:related', id, limit),
   memoryStats: () => ipcRenderer.invoke('memory:stats'),
   captureNote: (item) => ipcRenderer.invoke('memory:capture', item),
   forget: (id) => ipcRenderer.invoke('memory:forget', id),

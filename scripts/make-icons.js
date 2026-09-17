@@ -73,47 +73,6 @@ function sdRoundRect(px, py, halfW, halfH, r) {
   return Math.hypot(ax, ay) + Math.min(Math.max(qx, qy), 0) - r;
 }
 
-function sdSegment(px, py, ax, ay, bx, by, thickness) {
-  const pax = px - ax;
-  const pay = py - ay;
-  const bax = bx - ax;
-  const bay = by - ay;
-  const h = clamp((pax * bax + pay * bay) / (bax * bax + bay * bay), 0, 1);
-  return Math.hypot(pax - bax * h, pay - bay * h) - thickness;
-}
-
-/** Cubic bezier point at t. */
-function bezier(t, p0, p1, p2, p3) {
-  const u = 1 - t;
-  const a = u * u * u;
-  const b = 3 * u * u * t;
-  const c = 3 * u * t * t;
-  const d = t * t * t;
-  return [
-    a * p0[0] + b * p1[0] + c * p2[0] + d * p3[0],
-    a * p0[1] + b * p1[1] + c * p2[1] + d * p3[1],
-  ];
-}
-
-/**
- * Distance to a bezier drawn with a stroke that thins along its length.
- * Sampled into short capsules -- a tail needs to taper to read as a tail
- * rather than a bent limb, and the taper is what sells it at small sizes.
- */
-function sdTaperedCurve(px, py, p0, p1, p2, p3, wStart, wEnd, steps = 26) {
-  let best = Infinity;
-  let prev = bezier(0, p0, p1, p2, p3);
-  for (let i = 1; i <= steps; i++) {
-    const t = i / steps;
-    const cur = bezier(t, p0, p1, p2, p3);
-    const w = wStart + (wEnd - wStart) * t;
-    const d = sdSegment(px, py, prev[0], prev[1], cur[0], cur[1], w);
-    if (d < best) best = d;
-    prev = cur;
-  }
-  return best;
-}
-
 /** Coverage in [0,1] from a distance, antialiased over `aa` pixels. */
 const cover = (d, aa) => clamp(0.5 - d / aa, 0, 1);
 
@@ -129,38 +88,40 @@ function over(dst, i, r, g, b, a) {
   dst[i + 3] = Math.round(outA * 255);
 }
 
-/* ---------- the artwork: a mouse ---------- */
+/* ---------- the artwork: a bite ---------- */
 
 /**
- * Draws the mascot into an RGBA buffer.
+ * Draws the mark into an RGBA buffer: a disc with a bite taken out of its
+ * top-right corner, and two crumbs.
  *
- * A mouse reads at 16px only if it is reduced to the two things that make a
- * mouse a mouse: the big round ears and the tail. Everything else -- eyes,
- * snout, feet -- turns to mud at menu-bar size, so the head is one circle,
- * the ears are two, and the tail is a single curve.
+ * It is one silhouette and no detail, which is the only thing that survives
+ * at 16px in a menu bar. It is also strictly two-tone, so the same geometry
+ * works as a colour icon, as a macOS template glyph, and as the mark on the
+ * website, with nothing to keep in step but the numbers below.
  *
  * `mono` renders a black template glyph with no background plate.
  */
-function drawMouse(size, { mono = false, samples = 3 } = {}) {
+function drawBite(size, { mono = false, samples = 3 } = {}) {
   const rgba = Buffer.alloc(size * size * 4);
   const s = size;
   const aa = 2 / size;
 
   // Geometry in normalized [-1, 1] space so it scales to any size.
-  const plateHalf = 0.86;
-  const plateRadius = 0.30;
+  const plateHalf = 0.92;
+  const plateRadius = 0.1; // barely rounded: the edges are the point
 
-  const scale = mono ? 1.18 : 0.86;      // the glyph fills more of a tray icon
-  const headR = 0.42 * scale;
-  const headY = 0.06 * scale;
-  const earR = 0.26 * scale;
-  const earX = 0.36 * scale;
-  const earY = -0.30 * scale;
+  const scale = mono ? 1.12 : 0.9;
+  const discX = 0.0;
+  const discY = 0.05 * scale;
+  const discR = 0.62 * scale;
+  const biteX = 0.5 * scale;
+  const biteY = -0.48 * scale;
+  const biteR = 0.36 * scale;
 
   for (let y = 0; y < s; y++) {
     for (let x = 0; x < s; x++) {
-      let acc = null;
       const idx = (y * s + x) * 4;
+      const acc = [0, 0, 0, 0];
 
       for (let sy = 0; sy < samples; sy++) {
         for (let sx = 0; sx < samples; sx++) {
@@ -170,63 +131,24 @@ function drawMouse(size, { mono = false, samples = 3 } = {}) {
           const sample = Buffer.alloc(4);
 
           if (!mono) {
-            // Rounded plate with an indigo -> violet vertical gradient.
+            // A flat ink plate. No gradient: the system has no colour in it.
             const plate = cover(sdRoundRect(px, py, plateHalf, plateHalf, plateRadius), aa);
-            const t = clamp((py + 1) / 2, 0, 1);
-            over(sample, 0,
-              Math.round(79 + (139 - 79) * t),
-              Math.round(70 + (92 - 70) * t),
-              Math.round(229 + (246 - 229) * t),
-              plate);
+            over(sample, 0, 0, 0, 0, plate);
           }
 
           const ink = mono ? [0, 0, 0] : [255, 255, 255];
 
-          // Ears first, so the head circle sits on top of their inner edge.
-          const earL = cover(Math.hypot(px + earX, py - earY) - earR, aa);
-          const earR_ = cover(Math.hypot(px - earX, py - earY) - earR, aa);
-          over(sample, 0, ink[0], ink[1], ink[2], Math.max(earL, earR_));
+          const disc = cover(Math.hypot(px - discX, py - discY) - discR, aa);
+          const bite = cover(Math.hypot(px - biteX, py - biteY) - biteR, aa);
+          // Subtracting coverage rather than distance keeps the cut edge as
+          // antialiased as the outer one.
+          const bitten = disc * (1 - bite);
 
-          // Head.
-          const head = cover(Math.hypot(px, py - headY) - headR, aa);
-          over(sample, 0, ink[0], ink[1], ink[2], head);
+          const crumbA = cover(Math.hypot(px - 0.68 * scale, py - 0.34 * scale) - 0.1 * scale, aa);
+          const crumbB = cover(Math.hypot(px - 0.42 * scale, py - 0.74 * scale) - 0.07 * scale, aa);
 
-          // Tail: emerges from behind the head's lower right, sweeps out and
-          // curls back up, thinning to a point.
-          const tail = cover(
-            sdTaperedCurve(
-              px, py,
-              [0.16 * scale, 0.40 * scale],
-              [0.62 * scale, 0.56 * scale],
-              [0.92 * scale, 0.22 * scale],
-              [0.60 * scale, 0.02 * scale],
-              0.062 * scale,
-              0.016 * scale
-            ),
-            aa
-          );
-          over(sample, 0, ink[0], ink[1], ink[2], tail);
+          over(sample, 0, ink[0], ink[1], ink[2], Math.max(bitten, crumbA, crumbB));
 
-          // Inner ears and eyes are punched back out in the plate colour, so
-          // the face reads at large sizes and simply vanishes at 16px.
-          if (!mono) {
-            const t = clamp((py + 1) / 2, 0, 1);
-            const plateR = Math.round(79 + (139 - 79) * t);
-            const plateG = Math.round(70 + (92 - 70) * t);
-            const plateB = Math.round(229 + (246 - 229) * t);
-
-            const innerL = cover(Math.hypot(px + earX, py - earY) - earR * 0.5, aa);
-            const innerR = cover(Math.hypot(px - earX, py - earY) - earR * 0.5, aa);
-            over(sample, 0, plateR, plateG, plateB, Math.max(innerL, innerR));
-
-            const eyeY = headY - 0.02 * scale;
-            const eyeL = cover(Math.hypot(px + 0.15 * scale, py - eyeY) - 0.055 * scale, aa);
-            const eyeR = cover(Math.hypot(px - 0.15 * scale, py - eyeY) - 0.055 * scale, aa);
-            const nose = cover(Math.hypot(px, py - (headY + 0.20 * scale)) - 0.05 * scale, aa);
-            over(sample, 0, plateR, plateG, plateB, Math.max(eyeL, eyeR, nose));
-          }
-
-          if (acc === null) acc = [0, 0, 0, 0];
           acc[0] += sample[0];
           acc[1] += sample[1];
           acc[2] += sample[2];
@@ -250,7 +172,7 @@ function drawMouse(size, { mono = false, samples = 3 } = {}) {
 function write(file, size, opts) {
   const out = path.join(ROOT, file);
   fs.mkdirSync(path.dirname(out), { recursive: true });
-  fs.writeFileSync(out, encodePNG(size, size, drawMouse(size, opts)));
+  fs.writeFileSync(out, encodePNG(size, size, drawBite(size, opts)));
   console.log(`  ${file}  ${size}x${size}`);
 }
 
