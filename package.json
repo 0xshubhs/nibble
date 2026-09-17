@@ -9,10 +9,10 @@
     "email": "shubht3303@gmail.com"
   },
   "license": "MIT",
-  "homepage": "https://github.com/0xshubhs/dmgstarter",
+  "homepage": "https://github.com/0xshubhs/nibble",
   "repository": {
     "type": "git",
-    "url": "https://github.com/0xshubhs/dmgstarter.git"
+    "url": "https://github.com/0xshubhs/nibble.git"
   },
   "scripts": {
     "start": "electron .",

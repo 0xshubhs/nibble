@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;"
+    />
+    <title>Nibble</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="titlebar">
+      <div class="brand">
+        <img class="mark" src="../../assets/icon.png" alt="" width="32" height="32" />
+        <div>
+          <h1 id="app-name">Nibble</h1>
+          <p class="sub" id="app-sub">loading…</p>
+        </div>
+      </div>
+      <nav class="tabs" role="tablist">
+        <button class="tab is-active" data-tab="reminders" role="tab">Reminders</button>
+        <button class="tab" data-tab="memory" role="tab">Memory</button>
+        <button class="tab" data-tab="settings" role="tab">Settings</button>
+      </nav>
+    </header>
+
+    <main>
+      <!-- ---------------- reminders ---------------- -->
+      <section class="panel is-active" id="panel-reminders" role="tabpanel">
+        <div class="panel-head">
+          <h2>Scheduled</h2>
+          <button class="btn btn-primary" id="new-btn">New reminder</button>
+        </div>
+
+        <form class="editor" id="editor" hidden>
+          <div class="row">
+            <label class="field grow">
+              <span>Title</span>
+              <input id="f-title" type="text" placeholder="Stand up and stretch" maxlength="120" required />
+            </label>
+          </div>
+          <div class="row">
+            <label class="field grow">
+              <span>Note <em>optional</em></span>
+              <input id="f-body" type="text" placeholder="Shown in the notification" maxlength="240" />
+            </label>
+          </div>
+          <div class="row">
+            <label class="field">
+              <span>Date</span>
+              <input id="f-date" type="date" required />
+            </label>
+            <label class="field">
+              <span>Time</span>
+              <input id="f-time" type="time" required />
+            </label>
+            <label class="field">
+              <span>Repeat</span>
+              <select id="f-repeat">
+                <option value="none">Once</option>
+                <option value="hourly">Every hour</option>
+                <option value="daily">Every day</option>
+                <option value="weekdays">Weekdays</option>
+                <option value="weekly">Every week</option>
+                <option value="custom">Every…</option>
+              </select>
+            </label>
+            <label class="field" id="f-interval-wrap" hidden>
+              <span>Minutes</span>
+              <input id="f-interval" type="number" min="1" max="10080" value="60" />
+            </label>
+          </div>
+          <div class="row actions">
+            <button type="submit" class="btn btn-primary" id="save-btn">Save</button>
+            <button type="button" class="btn" id="cancel-btn">Cancel</button>
+            <span class="spacer"></span>
+            <button type="button" class="btn btn-quiet" id="delete-btn" hidden>Delete</button>
+          </div>
+        </form>
+
+        <ul class="list" id="list"></ul>
+        <p class="empty" id="empty" hidden>
+          Nothing scheduled yet. Add one and close the window — it keeps running in the tray.
+        </p>
+      </section>
+
+
+      <!-- ---------------- memory ---------------- -->
+      <section class="panel" id="panel-memory" role="tabpanel">
+        <div class="searchbar">
+          <input id="m-q" type="search" placeholder="Search everything you have captured…" autocomplete="off" />
+          <button class="btn" id="m-add">Add a note</button>
+        </div>
+        <p class="hint" id="m-hint"></p>
+
+        <form class="editor" id="m-editor" hidden>
+          <div class="row">
+            <label class="field grow">
+              <span>Title <em>optional</em></span>
+              <input id="m-title" type="text" maxlength="120" placeholder="What is this about?" />
+            </label>
+          </div>
+          <div class="row">
+            <label class="field grow">
+              <span>Anything you want to be able to ask about later</span>
+              <textarea id="m-text" rows="5" placeholder="Paste notes, a decision, a link with context…"></textarea>
+            </label>
+          </div>
+          <div class="row actions">
+            <button type="submit" class="btn btn-primary">Remember it</button>
+            <button type="button" class="btn" id="m-cancel">Cancel</button>
+          </div>
+        </form>
+
+        <ul class="list" id="m-results"></ul>
+        <p class="empty" id="m-empty" hidden></p>
+
+        <h2>Capture</h2>
+        <div class="callout" id="pause-row">
+          <p id="pause-text">Capture is running.</p>
+          <label class="switch" title="Pause all capture"><input type="checkbox" id="m-pause" /><span></span></label>
+        </div>
+        <ul class="settings" id="m-sources"></ul>
+
+        <div id="m-folder-block" hidden>
+          <h2>Folders</h2>
+          <ul class="settings" id="m-folders"></ul>
+          <div class="row actions" style="margin-top:10px">
+            <button class="btn" id="m-add-folder">Add a folder…</button>
+          </div>
+        </div>
+
+        <h2>Connect your LLM</h2>
+        <div class="callout" id="mcp-row">
+          <div>
+            <strong>Local MCP connector</strong>
+            <p id="mcp-state">Off. Turn it on to let Claude, ChatGPT or any MCP client read this memory.</p>
+          </div>
+          <label class="switch"><input type="checkbox" id="m-mcp" /><span></span></label>
+        </div>
+
+        <div class="connect" id="mcp-detail" hidden>
+          <div class="connect-row">
+            <span class="k">Claude Code</span>
+            <code id="mcp-cli"></code>
+            <button class="btn btn-sm copy" data-copy="mcp-cli">Copy</button>
+          </div>
+          <div class="connect-row">
+            <span class="k">URL</span>
+            <code id="mcp-url"></code>
+            <button class="btn btn-sm copy" data-copy="mcp-url">Copy</button>
+          </div>
+          <div class="connect-row">
+            <span class="k">Token</span>
+            <code id="mcp-token" class="masked"></code>
+            <button class="btn btn-sm" id="mcp-reveal">Show</button>
+            <button class="btn btn-sm copy" data-copy="mcp-token">Copy</button>
+          </div>
+          <p class="hint">
+            Loopback only, and every request needs the token. Anything that can run on this
+            machine can reach it, so treat the token like a password.
+            <button class="linkish" id="mcp-regen">Generate a new one</button>
+          </p>
+        </div>
+
+        <h2>Index</h2>
+        <div class="callout">
+          <p id="m-stats">…</p>
+          <button class="btn" id="m-compact">Compact</button>
+        </div>
+        <p class="hint" id="m-model"></p>
+      </section>
+
+      <!-- ---------------- settings ---------------- -->
+      <section class="panel" id="panel-settings" role="tabpanel">
+        <h2>Background &amp; access</h2>
+        <ul class="settings">
+          <li>
+            <div>
+              <strong>Start when I log in</strong>
+              <p>Registers a login item so reminders survive a reboot.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="s-login" /><span></span></label>
+          </li>
+          <li>
+            <div>
+              <strong>Start hidden</strong>
+              <p>Launch straight to the tray, without opening this window.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="s-hidden" /><span></span></label>
+          </li>
+          <li id="dock-row">
+            <div>
+              <strong>Keep the Dock icon</strong>
+              <p>Off makes it a pure menu-bar app while the window is closed.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="s-dock" /><span></span></label>
+          </li>
+          <li>
+            <div>
+              <strong>Notification sound</strong>
+              <p>Play the system sound when a reminder fires.</p>
+            </div>
+            <label class="switch"><input type="checkbox" id="s-sound" /><span></span></label>
+          </li>
+          <li>
+            <div>
+              <strong>Snooze length</strong>
+              <p>Used by the notification button and the tray menu.</p>
+            </div>
+            <span class="stepper">
+              <input type="number" id="s-snooze" min="1" max="1440" /> min
+            </span>
+          </li>
+        </ul>
+
+        <h2>Notifications</h2>
+        <div class="callout" id="notif-callout">
+          <p id="notif-state">Checking…</p>
+          <button class="btn" id="test-btn">Send a test notification</button>
+        </div>
+
+        <h2>Storage</h2>
+        <div class="callout">
+          <p id="storage-state">…</p>
+          <button class="btn" id="reveal-btn">Open data folder</button>
+        </div>
+
+        <div class="footer">
+          <span id="version"></span>
+          <button class="btn btn-quiet" id="quit-btn">Quit completely</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="renderer.js"></script>
+  </body>
+</html>

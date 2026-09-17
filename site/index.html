@@ -1,0 +1,949 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Nibble</title>
+<meta name="description" content="A portable reminder app that lives in your menu bar, fires real system notifications, and leaves nothing behind. macOS, Windows, Linux." />
+<link rel="icon" href="../assets/icon.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,700&family=JetBrains+Mono:wght@400;500&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+/* ============================================================
+   tokens -- light is the base, dark redefines only the values
+   ============================================================ */
+:root {
+  --ground: #eef1ef;
+  --surface: #ffffff;
+  --surface-2: #e6eae8;
+  --ink: #0d1613;
+  --muted: #5c6b66;
+  --line: #dbe2df;
+  --accent: #0f7a52;
+  --accent-ink: #ffffff;
+  --accent-soft: #daefe4;
+  --signal: #b4541a;
+  --shadow-sm: 0 1px 2px rgba(13, 22, 19, 0.07);
+  --shadow-lg: 0 24px 60px -20px rgba(13, 22, 19, 0.28);
+
+  --font-display: "Bricolage Grotesque", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Public Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --wrap: 1080px;
+  --gutter: clamp(18px, 5vw, 48px);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0b100e;
+    --surface: #141b18;
+    --surface-2: #1b2421;
+    --ink: #e8efec;
+    --muted: #8b9a94;
+    --line: #202c27;
+    --accent: #3ddc97;
+    --accent-ink: #052018;
+    --accent-soft: #11251c;
+    --signal: #f2a65a;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --shadow-lg: 0 24px 60px -20px rgba(0, 0, 0, 0.7);
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #0b100e;
+  --surface: #141b18;
+  --surface-2: #1b2421;
+  --ink: #e8efec;
+  --muted: #8b9a94;
+  --line: #202c27;
+  --accent: #3ddc97;
+  --accent-ink: #052018;
+  --accent-soft: #11251c;
+  --signal: #f2a65a;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 24px 60px -20px rgba(0, 0, 0, 0.7);
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+img, svg { max-width: 100%; }
+
+a { color: inherit; }
+
+::selection { background: var(--accent); color: var(--accent-ink); }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+
+.wrap {
+  max-width: var(--wrap);
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+/* ============================================================
+   type
+   ============================================================ */
+h1, h2, h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+  margin: 0;
+  line-height: 1.08;
+}
+h1 { font-size: clamp(2.4rem, 6.2vw, 4.1rem); }
+h2 { font-size: clamp(1.8rem, 4vw, 2.7rem); }
+h3 { font-size: 1.12rem; letter-spacing: -0.015em; }
+p { margin: 0; }
+
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0;
+}
+.lede { font-size: clamp(1.02rem, 1.7vw, 1.2rem); color: var(--muted); max-width: 56ch; }
+
+/* ============================================================
+   nav
+   ============================================================ */
+.nav {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 50;
+  background: color-mix(in srgb, var(--ground) 86%, transparent);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s ease;
+}
+.nav.is-stuck { border-bottom-color: var(--line); }
+.nav-in {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 62px;
+}
+.logo { display: flex; align-items: center; gap: 9px; text-decoration: none; font-family: var(--font-display); font-weight: 700; letter-spacing: -0.03em; font-size: 1.02rem; }
+.logo svg { width: 26px; height: 26px; flex: none; border-radius: 7px; }
+.nav-links { display: flex; gap: 4px; margin-left: auto; }
+.nav-links a {
+  text-decoration: none; color: var(--muted); font-size: 0.9rem; font-weight: 500;
+  padding: 7px 11px; border-radius: 8px;
+}
+.nav-links a:hover { color: var(--ink); background: var(--surface-2); }
+
+/* ============================================================
+   buttons
+   ============================================================ */
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--font-body); font-size: 0.92rem; font-weight: 600;
+  padding: 10px 17px; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--ink);
+  text-decoration: none; cursor: pointer; white-space: nowrap;
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.12s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.btn:hover { transform: translateY(-1px); border-color: color-mix(in srgb, var(--ink) 22%, var(--line)); }
+.btn:active { transform: translateY(0); }
+.btn-primary { background: var(--accent); border-color: transparent; color: var(--accent-ink); }
+.btn-primary:hover { background: var(--accent); filter: brightness(1.06); }
+.btn svg { width: 17px; height: 17px; flex: none; }
+.btn-sm { padding: 7px 13px; font-size: 0.86rem; }
+
+/* ============================================================
+   hero
+   ============================================================ */
+.hero { padding-block: clamp(46px, 8vw, 84px) clamp(30px, 5vw, 48px); }
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.92fr);
+  gap: clamp(32px, 5vw, 60px);
+  align-items: center;
+}
+.hero-copy { display: flex; flex-direction: column; align-items: flex-start; gap: 20px; }
+
+.live-tag {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.08em;
+  text-transform: uppercase; color: var(--muted);
+  border: 1px solid var(--line); background: var(--surface);
+  padding: 5px 11px 5px 9px; border-radius: 999px;
+}
+.dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none;
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 70%, transparent);
+  animation: pulse 2.4s ease-out infinite;
+}
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent); }
+  70% { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+h1 .soft { color: var(--muted); }
+
+.dl-row { display: flex; flex-wrap: wrap; gap: 10px; }
+.dl-note { font-family: var(--font-mono); font-size: 0.75rem; color: var(--muted); }
+.dl-note b { color: var(--ink); font-weight: 500; }
+
+/* ============================================================
+   hero demo -- a corner of a desktop, running the app
+   ============================================================ */
+.demo {
+  position: relative;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background:
+    radial-gradient(120% 90% at 78% 8%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 62%),
+    var(--surface);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+  min-height: 310px;
+  display: flex;
+  flex-direction: column;
+}
+.menubar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface-2) 70%, var(--surface));
+  font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted);
+}
+.menubar .spacer { flex: 1; }
+.tray-glyph { width: 15px; height: 15px; color: var(--ink); flex: none; }
+.tray-glyph.is-ringing { animation: nudge 0.6s ease; }
+@keyframes nudge {
+  0%, 100% { transform: rotate(0); }
+  25% { transform: rotate(-11deg); }
+  60% { transform: rotate(9deg); }
+}
+#clock { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+.chat {
+  flex: 1;
+  padding: 15px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  justify-content: flex-end;
+  min-height: 236px;
+}
+.bubble {
+  max-width: 92%;
+  padding: 9px 12px;
+  border-radius: 13px;
+  font-size: 0.87rem;
+  line-height: 1.5;
+  animation: rise 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.bubble.you {
+  align-self: flex-end;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-bottom-right-radius: 5px;
+  font-weight: 500;
+}
+.bubble.tool {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px dashed color-mix(in srgb, var(--accent) 45%, var(--line));
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.71rem;
+  padding: 5px 10px;
+  border-radius: 7px;
+}
+.bubble.tool b { color: var(--accent); font-weight: 500; }
+.bubble.them {
+  align-self: flex-start;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-bottom-left-radius: 5px;
+}
+.bubble.them .cite {
+  display: block;
+  margin-top: 5px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--muted);
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(9px); }
+  to { opacity: 1; transform: none; }
+}
+
+.demo-foot {
+  border-top: 1px solid var(--line);
+  padding: 9px 13px;
+  font-family: var(--font-mono); font-size: 0.68rem; color: var(--muted);
+  display: flex; align-items: center; gap: 7px;
+}
+
+/* ============================================================
+   marquee
+   ============================================================ */
+.marquee-section { padding-block: clamp(34px, 5vw, 56px); }
+.marquee-head { text-align: center; display: flex; flex-direction: column; gap: 9px; align-items: center; margin-bottom: 26px; }
+.marquee { display: flex; flex-direction: column; gap: 11px; mask-image: linear-gradient(90deg, transparent, #000 9%, #000 91%, transparent); -webkit-mask-image: linear-gradient(90deg, transparent, #000 9%, #000 91%, transparent); }
+.track { display: flex; gap: 11px; width: max-content; }
+.track-a { animation: roll 46s linear infinite; }
+.track-b { animation: roll 56s linear infinite reverse; }
+.track-c { animation: roll 40s linear infinite; }
+@keyframes roll { to { transform: translateX(-50%); } }
+.chip {
+  display: inline-flex; align-items: center; gap: 9px;
+  border: 1px solid var(--line); background: var(--surface);
+  border-radius: 999px; padding: 8px 16px 8px 13px;
+  font-size: 0.89rem; white-space: nowrap; color: var(--ink);
+}
+.chip .at { font-family: var(--font-mono); font-size: 0.74rem; color: var(--accent); font-variant-numeric: tabular-nums; }
+
+/* ============================================================
+   generic section
+   ============================================================ */
+section { scroll-margin-top: 80px; }
+.band { padding-block: clamp(50px, 7vw, 84px); border-top: 1px solid var(--line); }
+.band-head { display: flex; flex-direction: column; gap: 12px; margin-bottom: clamp(26px, 4vw, 42px); max-width: 60ch; }
+
+/* ---- steps (a real sequence, so numbered) ---- */
+.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: clamp(20px, 3vw, 34px); }
+.step { display: flex; flex-direction: column; gap: 8px; }
+.step-n {
+  font-family: var(--font-mono); font-size: 0.75rem; color: var(--accent);
+  border-top: 2px solid var(--accent); padding-top: 9px; width: 100%;
+}
+.step p { color: var(--muted); font-size: 0.94rem; }
+.step code {
+  font-family: var(--font-mono); font-size: 0.8rem;
+  background: var(--surface-2); border: 1px solid var(--line);
+  padding: 1px 6px; border-radius: 5px; color: var(--ink);
+}
+
+/* ---- platform table ---- */
+.plat-scroll { overflow-x: auto; }
+table.plat { width: 100%; border-collapse: collapse; min-width: 520px; }
+table.plat th, table.plat td { text-align: left; padding: 13px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.plat thead th {
+  font-family: var(--font-mono); font-size: 0.7rem; letter-spacing: 0.1em;
+  text-transform: uppercase; color: var(--muted); font-weight: 400;
+  border-bottom-color: var(--ink);
+}
+table.plat tbody tr:last-child td { border-bottom: 0; }
+.os { display: flex; align-items: center; gap: 9px; font-weight: 600; }
+.os svg { width: 17px; height: 17px; flex: none; }
+.file { font-family: var(--font-mono); font-size: 0.82rem; }
+.tag {
+  font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.05em;
+  text-transform: uppercase; padding: 2px 7px; border-radius: 5px;
+  background: var(--accent-soft); color: var(--accent); white-space: nowrap;
+}
+.tag.plain { background: var(--surface-2); color: var(--muted); }
+td .sub { color: var(--muted); font-size: 0.84rem; display: block; margin-top: 2px; }
+
+/* ---- feature list ---- */
+.feats { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+.feat { background: var(--surface); padding: 22px 21px; display: flex; flex-direction: column; gap: 7px; }
+.feat svg { width: 20px; height: 20px; color: var(--accent); margin-bottom: 3px; }
+.feat p { color: var(--muted); font-size: 0.91rem; }
+
+/* ---- storage split ---- */
+.split { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 16px; }
+.slab {
+  border: 1px solid var(--line); border-radius: 14px; background: var(--surface);
+  padding: 22px 21px; display: flex; flex-direction: column; gap: 12px;
+}
+.slab.lead { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); background: linear-gradient(180deg, var(--accent-soft), var(--surface) 58%); }
+.slab-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.paths { font-family: var(--font-mono); font-size: 0.76rem; color: var(--muted); display: flex; flex-direction: column; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.paths li { display: flex; gap: 8px; align-items: baseline; }
+.paths li::before { content: ""; width: 5px; height: 5px; border-radius: 1px; background: var(--accent); flex: none; transform: translateY(-2px); }
+.paths .p { word-break: break-all; color: var(--ink); }
+
+/* ---- connector strip ---- */
+.connect-strip {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 15px 17px;
+  overflow-x: auto;
+  box-shadow: var(--shadow-sm);
+}
+.connect-strip code {
+  font-family: var(--font-mono);
+  font-size: 0.86rem;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.connect-strip code::before { content: "$ "; color: var(--accent); }
+
+/* ---- faq ---- */
+.faq { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.faq details { border-bottom: 1px solid var(--line); }
+.faq summary {
+  cursor: pointer; list-style: none; padding: 17px 34px 17px 0; position: relative;
+  font-family: var(--font-display); font-weight: 600; font-size: 1.04rem; letter-spacing: -0.015em;
+}
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after {
+  content: "+"; position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  font-family: var(--font-mono); font-size: 1.2rem; color: var(--muted); line-height: 1;
+}
+.faq details[open] summary::after { content: "\2212"; color: var(--accent); }
+.faq .answer { padding: 0 0 19px; color: var(--muted); max-width: 70ch; font-size: 0.95rem; }
+.faq .answer code { font-family: var(--font-mono); font-size: 0.85rem; background: var(--surface-2); border: 1px solid var(--line); padding: 1px 5px; border-radius: 4px; color: var(--ink); }
+
+/* ---- cta ---- */
+.cta { text-align: center; display: flex; flex-direction: column; align-items: center; gap: 20px; }
+.cta .lede { text-align: center; }
+
+/* ---- footer ---- */
+footer { border-top: 1px solid var(--line); padding-block: 32px 40px; }
+.foot-in { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; justify-content: space-between; }
+.foot-links { display: flex; flex-wrap: wrap; gap: 18px; font-size: 0.86rem; }
+.foot-links a { color: var(--muted); text-decoration: none; }
+.foot-links a:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+.foot-note { font-family: var(--font-mono); font-size: 0.72rem; color: var(--muted); }
+
+/* ============================================================
+   responsive + motion
+   ============================================================ */
+@media (max-width: 860px) {
+  .hero-grid { grid-template-columns: minmax(0, 1fr); }
+  .nav-links a[data-optional] { display: none; }
+}
+@media (max-width: 480px) {
+  .nav-links { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .marquee { mask-image: none; -webkit-mask-image: none; }
+  .track { flex-wrap: wrap; width: 100%; }
+}
+</style>
+</head>
+<body>
+
+<!-- ===================== nav ===================== -->
+<header class="nav" id="nav">
+  <div class="wrap nav-in">
+    <a class="logo" href="#top">
+      <svg viewBox="0 0 64 64" aria-hidden="true">
+        <defs>
+          <linearGradient id="lg" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#4f46e5" /><stop offset="1" stop-color="#8b5cf6" />
+          </linearGradient>
+        </defs>
+        <rect width="64" height="64" rx="18" fill="url(#lg)" />
+        <g fill="#fff">
+          <circle cx="22.1" cy="23.7" r="7.2" />
+          <circle cx="41.9" cy="23.7" r="7.2" />
+          <circle cx="32" cy="33.6" r="11.6" />
+        </g>
+        <path d="M36.4 43 C49.1 47.4 57.3 38.1 48.5 32.6" fill="none" stroke="#fff"
+              stroke-width="3" stroke-linecap="round" />
+        <g fill="url(#lg)">
+          <circle cx="22.1" cy="23.7" r="3.6" />
+          <circle cx="41.9" cy="23.7" r="3.6" />
+          <circle cx="27.9" cy="33" r="1.5" />
+          <circle cx="36.1" cy="33" r="1.5" />
+          <circle cx="32" cy="39.1" r="1.4" />
+        </g>
+      </svg>
+      Nibble
+    </a>
+    <nav class="nav-links">
+      <a href="#how">How it works</a>
+      <a href="#platforms">Downloads</a>
+      <a href="#connect">Connect</a>
+      <a href="#features" data-optional>Features</a>
+      <a href="#storage" data-optional>Portable</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <a class="btn btn-primary btn-sm" href="https://github.com/0xshubhs/nibble/releases/latest">Get it</a>
+  </div>
+</header>
+
+<main id="top">
+
+<!-- ===================== hero ===================== -->
+<section class="hero">
+  <div class="wrap hero-grid">
+    <div class="hero-copy">
+      <span class="live-tag"><span class="dot"></span> indexing on this device</span>
+      <h1>Stop explaining yourself <span class="soft">to your AI.</span></h1>
+      <p class="lede">
+        A small app in your menu bar that remembers what you copy, write and keep —
+        indexes it on your own machine — and hands it to Claude, ChatGPT or any MCP
+        client as a tool they can search. No account, no server, nothing uploaded.
+      </p>
+      <div class="dl-row">
+        <a class="btn btn-primary" id="dl-main" href="https://github.com/0xshubhs/nibble/releases/latest">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 11l5 5 5-5M4 20h16" /></svg>
+          <span id="dl-main-label">Download</span>
+        </a>
+        <a class="btn" href="https://github.com/0xshubhs/nibble">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 1.5a10.5 10.5 0 0 0-3.32 20.47c.53.1.72-.23.72-.5v-1.8c-2.92.63-3.54-1.4-3.54-1.4-.48-1.22-1.17-1.55-1.17-1.55-.96-.65.07-.64.07-.64 1.06.08 1.61 1.09 1.61 1.09.94 1.6 2.47 1.14 3.07.87.1-.68.37-1.14.67-1.4-2.33-.27-4.78-1.17-4.78-5.18 0-1.15.41-2.08 1.08-2.82-.11-.27-.47-1.34.1-2.79 0 0 .88-.28 2.88 1.08a9.95 9.95 0 0 1 5.24 0c2-1.36 2.88-1.08 2.88-1.08.57 1.45.21 2.52.1 2.79.67.74 1.08 1.67 1.08 2.82 0 4.02-2.46 4.9-4.8 5.16.38.33.72.97.72 1.96v2.9c0 .28.19.61.72.5A10.5 10.5 0 0 0 12 1.5Z" /></svg>
+          Source
+        </a>
+      </div>
+      <p class="dl-note" id="dl-note">MIT licensed · <b>v0.1.0</b> · macOS, Windows &amp; Linux</p>
+    </div>
+
+    <!-- live demo: an assistant reaching into the memory -->
+    <div class="demo" aria-label="An assistant answering from your local memory">
+      <div class="menubar">
+        <svg class="tray-glyph" id="tray-glyph" viewBox="0 0 64 64" aria-hidden="true">
+          <g fill="currentColor">
+            <circle cx="22.1" cy="23.7" r="8.4" />
+            <circle cx="41.9" cy="23.7" r="8.4" />
+            <circle cx="32" cy="33.6" r="13.5" />
+          </g>
+          <path d="M36.4 45 C50 49 58.5 39 49.5 33" fill="none" stroke="currentColor"
+                stroke-width="3.4" stroke-linecap="round" />
+        </svg>
+        <span>nibble · MCP</span>
+        <span class="spacer"></span>
+        <span id="clock">--:--</span>
+      </div>
+      <div class="chat" id="chat"></div>
+      <div class="demo-foot"><span class="dot"></span> <span id="foot-text">127.0.0.1 · nothing left this machine</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== marquee ===================== -->
+<section class="marquee-section">
+  <div class="wrap marquee-head">
+    <p class="eyebrow">what you can finally ask</p>
+    <h2>Questions your AI could never answer.</h2>
+  </div>
+  <div class="marquee" aria-hidden="true">
+    <div class="track track-a" data-row="0"></div>
+    <div class="track track-b" data-row="1"></div>
+    <div class="track track-c" data-row="2"></div>
+  </div>
+</section>
+
+<!-- ===================== how ===================== -->
+<section class="band" id="how">
+  <div class="wrap">
+    <div class="band-head">
+      <p class="eyebrow">how it works</p>
+      <h2>Three steps, then forget it exists.</h2>
+    </div>
+    <ol class="steps" style="list-style:none;margin:0;padding:0">
+      <li class="step">
+        <span class="step-n">01 — Install &amp; forget</span>
+        <h3>No installer, no account</h3>
+        <p>Mount the <code>.dmg</code>, run the portable <code>.exe</code>, or <code>chmod +x</code> the AppImage. The mouse appears in your menu bar and stays there.</p>
+      </li>
+      <li class="step">
+        <span class="step-n">02 — Turn on a source</span>
+        <h3>It starts remembering</h3>
+        <p>Clipboard, or folders you nominate. Everything is chunked and indexed on your own machine — searchable the moment it lands, embedded a beat later.</p>
+      </li>
+      <li class="step">
+        <span class="step-n">03 — Paste one line</span>
+        <h3>Your AI can search it</h3>
+        <p>Add the connector to Claude, ChatGPT or anything else that speaks MCP. From then on it looks things up instead of asking you to explain again.</p>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<!-- ===================== platforms ===================== -->
+<section class="band" id="platforms">
+  <div class="wrap">
+    <div class="band-head">
+      <p class="eyebrow">downloads</p>
+      <h2>One codebase, three real builds.</h2>
+      <p class="lede">Every tagged release is compiled by GitHub Actions on its own native runner — macOS builds on macOS, Windows on Windows — and published with checksums.</p>
+    </div>
+    <div class="plat-scroll">
+      <table class="plat">
+        <thead>
+          <tr><th>Platform</th><th>File</th><th>How it runs</th><th></th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="os">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16.4 12.7c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.15-2.8.85-3.5.85-.7 0-1.85-.83-3-.81-1.55.02-3 .9-3.8 2.28-1.62 2.8-.41 6.95 1.16 9.22.77 1.11 1.68 2.36 2.88 2.31 1.16-.05 1.6-.75 3-.75s1.8.75 3.02.72c1.25-.02 2.04-1.13 2.8-2.25.88-1.29 1.24-2.54 1.26-2.6-.03-.01-2.42-.93-2.42-3.67ZM14.1 5.9c.63-.77 1.06-1.83.94-2.9-.91.04-2.01.61-2.67 1.37-.59.68-1.1 1.76-.96 2.8 1.01.08 2.05-.51 2.69-1.27Z" /></svg>
+              macOS</span></td>
+            <td class="file">.dmg<span class="sub">also .zip</span></td>
+            <td>Drag to Applications, or run it from anywhere<span class="sub">Apple silicon &amp; Intel</span></td>
+            <td><span class="tag plain">Drag &amp; drop</span></td>
+          </tr>
+          <tr>
+            <td><span class="os">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M3 5.4 10.2 4.4v7.1H3V5.4Zm0 13.2 7.2 1V11.9H3v6.7Zm8.1 1.15L21 21V11.9h-9.9v7.85ZM11.1 4.26 21 3v8.05h-9.9V4.26Z" /></svg>
+              Windows</span></td>
+            <td class="file">portable .exe<span class="sub">also .msi-style setup</span></td>
+            <td>Double-click — nothing is written to the registry<span class="sub">x64 &amp; ARM64</span></td>
+            <td><span class="tag">Portable</span></td>
+          </tr>
+          <tr>
+            <td><span class="os">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2c-2 0-3 1.7-3 3.6 0 1.2.2 1.9-.4 2.9-.8 1.3-2.2 2.8-2.7 4.7-.4 1.4-.2 2.3.1 2.8-.5.7-.3 1.5.3 1.8.6.3.7.9.7 1.4 0 .9 1 1.4 2.4 1.4 1.3 0 1.9-.5 2.6-.5s1.3.5 2.6.5c1.4 0 2.4-.5 2.4-1.4 0-.5.1-1.1.7-1.4.6-.3.8-1.1.3-1.8.3-.5.5-1.4.1-2.8-.5-1.9-1.9-3.4-2.7-4.7-.6-1-.4-1.7-.4-2.9C15 3.7 14 2 12 2Zm-1.4 3.1c.45 0 .8.5.8 1.1s-.35 1.1-.8 1.1-.8-.5-.8-1.1.35-1.1.8-1.1Zm2.8 0c.45 0 .8.5.8 1.1s-.35 1.1-.8 1.1-.8-.5-.8-1.1.35-1.1.8-1.1Z" /></svg>
+              Linux</span></td>
+            <td class="file">.AppImage<span class="sub">also .deb, .tar.gz</span></td>
+            <td><code style="font-family:var(--font-mono);font-size:.8rem">chmod +x</code> and run, on any distro<span class="sub">x64 &amp; ARM64</span></td>
+            <td><span class="tag">Portable</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="dl-note" style="margin-top:18px">
+      Unsigned builds are the default. macOS will ask you to confirm the first launch under
+      <b>System Settings → Privacy &amp; Security</b> until you add a Developer ID certificate to CI.
+    </p>
+  </div>
+</section>
+
+<!-- ===================== features ===================== -->
+<section class="band" id="features">
+  <div class="wrap">
+    <div class="band-head">
+      <p class="eyebrow">what it does</p>
+      <h2>A memory that stays on your machine.</h2>
+    </div>
+    <div class="feats">
+      <div class="feat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M16.2 16.2 21 21" /></svg>
+        <h3>Words and meaning</h3>
+        <p>Keyword and semantic search are fused, so an exact term still wins and a paraphrase still lands. Below a similarity floor it says no results, instead of returning everything in some order.</p>
+      </div>
+      <div class="feat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="M8 9h8M8 13h5" /></svg>
+        <h3>Indexed on device</h3>
+        <p>A 23&nbsp;MB model runs in its own process on your machine. Downloaded once, then it never needs the network again. A cloud key is optional, never required.</p>
+      </div>
+      <div class="feat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h7l2 2h7v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V7Z" transform="translate(1 -1)" /></svg>
+        <h3>Capture you can see</h3>
+        <p>Clipboard and folders today, audio and screen next. Every source has a switch, a count of what it stored, and a global pause. Anything shaped like a password is dropped before it is written.</p>
+      </div>
+      <div class="feat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 1 0-12 0c0 5-2 6-2 6h16s-2-1-2-6" /><path d="M10.3 20a2 2 0 0 0 3.4 0" /></svg>
+        <h3>Reminders that reach you</h3>
+        <p>Real system notifications, not web toasts. Once, hourly, daily, weekdays or weekly — and a 9am daily stays at 9am across a daylight-saving change.</p>
+      </div>
+      <div class="feat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 7v5l3 2" /><circle cx="12" cy="12" r="9" /></svg>
+        <h3>Survives sleep</h3>
+        <p>Timers are re-checked when the machine wakes or the screen unlocks, so something that came due in your bag still reaches you — once, not as a backlog.</p>
+      </div>
+      <div class="feat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="10" rx="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+        <h3>Forget, properly</h3>
+        <p>Forget one result, or everything a source ever captured. Compact rewrites the files without it. No account means there is no copy anywhere else to chase.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== connector ===================== -->
+<section class="band" id="connect">
+  <div class="wrap">
+    <div class="band-head">
+      <p class="eyebrow">connect your llm</p>
+      <h2>One line, then your AI can just&nbsp;ask.</h2>
+      <p class="lede">Nibble speaks MCP, so Claude, ChatGPT or anything else that takes a connector can search your memory as a tool — and schedule reminders while it is there.</p>
+    </div>
+
+    <div class="connect-strip">
+      <code>claude mcp add nibble -- node /path/to/src/mcp/stdio.js</code>
+    </div>
+
+    <div class="split" style="margin-top:16px">
+      <div class="slab">
+        <div class="slab-head"><h3>Six tools</h3></div>
+        <ul class="paths">
+          <li><span class="p">search_memory</span></li>
+          <li><span class="p">recent_memory</span></li>
+          <li><span class="p">remember</span></li>
+          <li><span class="p">memory_stats</span></li>
+          <li><span class="p">list_reminders</span></li>
+          <li><span class="p">add_reminder</span></li>
+        </ul>
+      </div>
+      <div class="slab">
+        <div class="slab-head"><h3>Locked to this machine</h3><span class="tag">127.0.0.1</span></div>
+        <p style="color:var(--muted);font-size:.93rem">
+          Bound to loopback, so nothing off-box can reach it. Every request needs a bearer
+          token, because anything running locally — including a web page you have open —
+          can also talk to localhost. The Origin header is checked for the same reason.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== storage ===================== -->
+<section class="band" id="storage">
+  <div class="wrap">
+    <div class="band-head">
+      <p class="eyebrow">portable by default</p>
+      <h2>You decide where it writes.</h2>
+      <p class="lede">The app picks its data folder at launch. On a USB stick or an AppImage it keeps everything beside the binary; installed properly, it uses the normal per-user location.</p>
+    </div>
+    <div class="split">
+      <div class="slab lead">
+        <div class="slab-head"><h3>Portable mode</h3><span class="tag">default on USB</span></div>
+        <p style="color:var(--muted);font-size:.93rem">Triggered by the Windows portable build, an AppImage, a <code style="font-family:var(--font-mono);font-size:.8rem">--portable</code> flag, or a file named <code style="font-family:var(--font-mono);font-size:.8rem">portable</code> next to the executable.</p>
+        <ul class="paths">
+          <li><span class="p">./nibble-data/store.json</span></li>
+          <li><span class="p">./nibble-data/ (cache)</span></li>
+        </ul>
+      </div>
+      <div class="slab">
+        <div class="slab-head"><h3>Installed mode</h3><span class="tag plain">default when installed</span></div>
+        <p style="color:var(--muted);font-size:.93rem">The ordinary per-user application folder for each OS, so backups and migration tools pick it up.</p>
+        <ul class="paths">
+          <li><span class="p">~/Library/Application Support/Nibble</span></li>
+          <li><span class="p">%APPDATA%\Nibble</span></li>
+          <li><span class="p">~/.config/Nibble</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== faq ===================== -->
+<section class="band" id="faq">
+  <div class="wrap">
+    <div class="band-head">
+      <p class="eyebrow">questions</p>
+      <h2>Before you download it.</h2>
+    </div>
+    <div class="faq">
+      <details open>
+        <summary>Does anything actually leave my machine?</summary>
+        <p class="answer">With the default settings, no. The embedding model is downloaded once (~23&nbsp;MB) and then runs locally, the index is two files on your disk, and the connector is bound to <code>127.0.0.1</code>. There is no account and no server to sync to. If you switch the embedder to Gemini or Voyage in Settings, then your text does go to them — that is the trade, and it is off by default.</p>
+      </details>
+      <details>
+        <summary>How is this different from just pasting context into the chat?</summary>
+        <p class="answer">You do not have to remember what to paste. Your assistant searches the memory itself, as a tool, when the question calls for it — including things you copied weeks ago and forgot you had.</p>
+      </details>
+      <details>
+        <summary>What stops it from storing my passwords?</summary>
+        <p class="answer">The clipboard source drops anything matching a known credential shape — private keys, API tokens, JWTs, card-shaped digit runs — plus anything that looks like a high-entropy random string. It is biased towards throwing away something harmless rather than storing a secret. It is a safety net, not a guarantee, which is why <strong>Forget</strong> is on every result.</p>
+      </details>
+      <details>
+        <summary>Can it record my meetings and my screen?</summary>
+        <p class="answer">Not yet, and it says so in the app rather than implying otherwise. Audio is the next phase and screen capture the one after. When they land they get a visible indicator whenever they are running, a one-click pause, and frames that are read and discarded rather than stored — screen capture in particular, because Windows and Linux do not gate it behind any OS permission at all.</p>
+      </details>
+      <details>
+        <summary>Why is the download about 160&nbsp;MB?</summary>
+        <p class="answer">It ships a browser engine and a machine-learning runtime. That is the trade for one codebase producing a native-feeling app on all three platforms, with on-device search, and no runtime to install first.</p>
+      </details>
+      <details>
+        <summary>macOS says it is from an unidentified developer.</summary>
+        <p class="answer">The public builds are ad-hoc signed, not Developer ID signed — that needs a paid Apple account. Right-click the app and choose <em>Open</em>, or allow it once under <strong>System Settings → Privacy &amp; Security</strong>. Adding a certificate to the CI secrets makes the warning go away for everyone.</p>
+      </details>
+      <details>
+        <summary>Can I run it on a machine I do not own?</summary>
+        <p class="answer">That is what the portable builds are for. No installer, no admin rights, no registry writes — the memory, the model and the index all live in a folder beside the executable. Take the folder with you and the machine is as you found it.</p>
+      </details>
+      <details>
+        <summary>Can I build it myself?</summary>
+        <p class="answer">Clone the repo, <code>npm install</code>, then <code>npm run build:mac</code>, <code>build:win</code> or <code>build:linux</code>. Each target builds natively, so use the CI workflow if you need all three from one machine.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== cta ===================== -->
+<section class="band">
+  <div class="wrap cta">
+    <p class="eyebrow">get it</p>
+    <h2>Put it in your menu bar and stop thinking about it.</h2>
+    <p class="lede">Free, MIT licensed, and small enough to read end to end.</p>
+    <div class="dl-row" style="justify-content:center">
+      <a class="btn btn-primary" href="https://github.com/0xshubhs/nibble/releases/latest">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 11l5 5 5-5M4 20h16" /></svg>
+        Download for free
+      </a>
+      <a class="btn" href="https://github.com/0xshubhs/nibble">Read the source</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap foot-in">
+    <div class="foot-links">
+      <a href="https://github.com/0xshubhs/nibble">GitHub</a>
+      <a href="https://github.com/0xshubhs/nibble/releases">Releases</a>
+      <a href="https://github.com/0xshubhs/nibble/issues">Report a bug</a>
+      <a href="https://github.com/0xshubhs/nibble/blob/main/LICENSE">MIT License</a>
+    </div>
+    <p class="foot-note">Built by 0xshubhs · no trackers on this page</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- nav hairline on scroll ---------- */
+  var nav = document.getElementById("nav");
+  var onScroll = function () { nav.classList.toggle("is-stuck", window.scrollY > 6); };
+  window.addEventListener("scroll", onScroll, { passive: true });
+  onScroll();
+
+  /* ---------- marquee content ---------- */
+  var ROWS = [
+    [["What did I promise to send by Friday?", "assistant"], ["Where did I leave off on this?", "assistant"],
+     ["Who sent me that screenshot?", "assistant"], ["What was the staging rotation policy?", "files"],
+     ["Find that article from last Tuesday", "clipboard"]],
+    [["What did we decide about ARM builds?", "files"], ["What have I been avoiding?", "assistant"],
+     ["Show me everything on notarization", "clipboard"], ["What was I worried about last month?", "assistant"],
+     ["Which key did I say needed rotating?", "files"]],
+    [["How has my thinking changed here?", "assistant"], ["What did I actually do today?", "clipboard"],
+     ["Action items from this morning", "files"], ["Why did we pick this library?", "files"],
+     ["What do I keep re-explaining?", "assistant"]]
+  ];
+
+  document.querySelectorAll(".track").forEach(function (track) {
+    var row = ROWS[Number(track.dataset.row)];
+    // The row is rendered twice so the -50% keyframe loops seamlessly.
+    var html = row.concat(row).map(function (item) {
+      return '<span class="chip">' + item[0] + '<span class="at">' + item[1] + "</span></span>";
+    }).join("");
+    track.innerHTML = html;
+  });
+
+  /* ---------- OS-aware download button ---------- */
+  var ua = navigator.userAgent;
+  var os = /Mac/i.test(ua) ? "macOS" : /Win/i.test(ua) ? "Windows" : /Linux|X11|Android/i.test(ua) ? "Linux" : null;
+  if (os) {
+    document.getElementById("dl-main-label").textContent = "Download for " + os;
+    var file = { "macOS": ".dmg", "Windows": "portable .exe", "Linux": ".AppImage" }[os];
+    document.getElementById("dl-note").innerHTML =
+      "MIT licensed · <b>v0.1.0</b> · " + os + " " + file;
+  }
+
+  /* ---------- the live recall demo ---------- */
+
+  var TURNS = [
+    {
+      you: "What did we decide about the Windows ARM build?",
+      tool: "search_memory",
+      arg: "windows arm build decision",
+      them: "You cut it until someone actually asks for it.",
+      cite: "Standup 12 Sep \u00b7 folders"
+    },
+    {
+      you: "How often does the staging password rotate?",
+      tool: "search_memory",
+      arg: "staging credentials rotation",
+      them: "Every 90 days, done by whoever is on call.",
+      cite: "Deploy runbook \u00b7 folders"
+    },
+    {
+      you: "Remind me to push the release tag tomorrow at 9.",
+      tool: "add_reminder",
+      arg: "2026-09-18T09:00",
+      them: "Set for tomorrow, 09:00.",
+      cite: "notification \u00b7 on this device"
+    },
+    {
+      you: "What was that link I copied about notarizing?",
+      tool: "search_memory",
+      arg: "notarize macos before distribution",
+      them: "developer.apple.com \u2014 notarizing before distribution.",
+      cite: "clipboard \u00b7 17 Sep"
+    }
+  ];
+
+  var chat = document.getElementById("chat");
+  var glyph = document.getElementById("tray-glyph");
+  var footText = document.getElementById("foot-text");
+  var clock = document.getElementById("clock");
+  var turn = 0;
+
+  function tickClock() {
+    clock.textContent = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  tickClock();
+  setInterval(tickClock, 15000);
+
+  function bubble(cls, build) {
+    var el = document.createElement("div");
+    el.className = "bubble " + cls;
+    build(el);
+    chat.appendChild(el);
+    // Only the last few turns stay on screen.
+    while (chat.children.length > 3) chat.firstElementChild.remove();
+    return el;
+  }
+
+  var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function play(t, instant) {
+    var step = instant ? 0 : 1;
+
+    bubble("you", function (el) { el.textContent = t.you; });
+
+    setTimeout(function () {
+      bubble("tool", function (el) {
+        el.innerHTML = "\u2192 <b>" + t.tool + "</b>(" + JSON.stringify(t.arg) + ")";
+      });
+      glyph.classList.add("is-ringing");
+      setTimeout(function () { glyph.classList.remove("is-ringing"); }, 700);
+      footText.textContent = "answered from this machine \u00b7 nothing uploaded";
+    }, step * 700);
+
+    setTimeout(function () {
+      bubble("them", function (el) {
+        el.textContent = t.them;
+        var c = document.createElement("span");
+        c.className = "cite";
+        c.textContent = t.cite;
+        el.appendChild(c);
+      });
+    }, step * 1500);
+  }
+
+  if (reduced) {
+    // No cycling: show one complete exchange so the idea reads at rest.
+    play(TURNS[0], true);
+    footText.textContent = "127.0.0.1 \u00b7 nothing left this machine";
+  } else {
+    // The first exchange is on screen before any interval runs, so the page
+    // reads correctly in a screenshot or a thumbnail.
+    play(TURNS[0]);
+    turn = 1;
+    setInterval(function () {
+      play(TURNS[turn % TURNS.length]);
+      turn++;
+    }, 6200);
+  }
+})();
+</script>
+</body>
+</html>

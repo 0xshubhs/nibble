@@ -1,0 +1,43 @@
+name: pages
+
+# Publishes site/ to GitHub Pages.
+#
+# Manual on purpose: running it makes the page public. Turn Pages on first
+# (Settings -> Pages -> Source: GitHub Actions), then run this workflow --
+# or add a `push:` trigger here once you want every commit to deploy.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble the site
+        run: |
+          mkdir -p _site/assets
+          cp site/index.html _site/
+          cp assets/icon.png _site/assets/
+          # The page links ../assets/icon.png; flatten it for Pages.
+          sed -i 's#\.\./assets/icon\.png#assets/icon.png#' _site/index.html
+          touch _site/.nojekyll
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4
