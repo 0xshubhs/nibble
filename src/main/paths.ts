@@ -1,7 +1,6 @@
-'use strict';
-const path = require('path');
-const fs = require('fs');
-const { app } = require('electron');
+import path from 'path';
+import fs from 'fs';
+import { app } from 'electron';
 
 /**
  * Portable mode: keep every byte the app writes next to the executable
@@ -21,7 +20,12 @@ const { app } = require('electron');
 
 const FOLDER = 'nibble-data';
 
-function candidateDir() {
+export interface DataPath {
+  dir: string;
+  portable: boolean;
+}
+
+function candidateDir(): string {
   if (process.env.PORTABLE_EXECUTABLE_DIR) {
     return process.env.PORTABLE_EXECUTABLE_DIR;
   }
@@ -38,7 +42,7 @@ function candidateDir() {
   return path.join(__dirname, '..', '..');
 }
 
-function isWritable(dir) {
+function isWritable(dir: string): boolean {
   try {
     fs.accessSync(dir, fs.constants.W_OK);
     return true;
@@ -47,10 +51,10 @@ function isWritable(dir) {
   }
 }
 
-let resolved = null;
+let resolved: DataPath | null = null;
 
 /** Decides where data lives. Must be called before `app.whenReady()`. */
-function initDataPath() {
+export function initDataPath(): DataPath {
   if (resolved) return resolved;
 
   const asked =
@@ -80,8 +84,6 @@ function initDataPath() {
   return resolved;
 }
 
-function dataPath() {
-  return resolved || { dir: app.getPath('userData'), portable: false };
+export function dataPath(): DataPath {
+  return resolved ?? { dir: app.getPath('userData'), portable: false };
 }
-
-module.exports = { initDataPath, dataPath };

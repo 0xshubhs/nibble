@@ -1,5 +1,5 @@
-'use strict';
-const { clipboard } = require('electron');
+import { clipboard } from 'electron';
+import type { CaptureSource, SourceInstance } from '../../types';
 
 /**
  * Watches the clipboard and remembers what you copied.
@@ -18,35 +18,37 @@ const MAX_LEN = 200_000;
  * This is a safety net, not a guarantee -- it is deliberately biased towards
  * dropping something harmless over storing a credential.
  */
-const SECRET_PATTERNS = [
+const SECRET_PATTERNS: RegExp[] = [
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
-  /\bsk-[A-Za-z0-9_-]{16,}\b/,            // OpenAI-style keys
-  /\bgh[pousr]_[A-Za-z0-9]{16,}\b/,       // GitHub tokens
-  /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/,     // Slack tokens
-  /\bAKIA[0-9A-Z]{16}\b/,                 // AWS access key ids
-  /\bAIza[0-9A-Za-z_-]{35}\b/,            // Google API keys
+  /\bsk-[A-Za-z0-9_-]{16,}\b/, // OpenAI-style keys
+  /\bgh[pousr]_[A-Za-z0-9]{16,}\b/, // GitHub tokens
+  /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/, // Slack tokens
+  /\bAKIA[0-9A-Z]{16}\b/, // AWS access key ids
+  /\bAIza[0-9A-Za-z_-]{35}\b/, // Google API keys
   /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\./, // JWTs
-  /\b(?:\d[ -]*?){13,16}\b/,              // card-shaped digit runs
+  /\b(?:\d[ -]*?){13,16}\b/, // card-shaped digit runs
   /\b(?:pass(?:word|phrase)|secret|api[_ -]?key|token)\b\s*[:=]/i,
 ];
 
 /** A long unbroken high-entropy blob is almost always a credential. */
-function looksRandom(text) {
+function looksRandom(text: string): boolean {
   const t = text.trim();
   if (t.length < 24 || t.length > 200 || /\s/.test(t)) return false;
   const classes =
-    Number(/[a-z]/.test(t)) + Number(/[A-Z]/.test(t)) + Number(/\d/.test(t)) + Number(/[^A-Za-z0-9]/.test(t));
+    Number(/[a-z]/.test(t)) +
+    Number(/[A-Z]/.test(t)) +
+    Number(/\d/.test(t)) +
+    Number(/[^A-Za-z0-9]/.test(t));
   if (classes < 3) return false;
-  const unique = new Set(t).size;
-  return unique / t.length > 0.5;
+  return new Set(t).size / t.length > 0.5;
 }
 
-function isSecret(text) {
+export function isSecret(text: string): boolean {
   if (SECRET_PATTERNS.some((re) => re.test(text))) return true;
   return looksRandom(text);
 }
 
-module.exports = {
+const source: CaptureSource = {
   id: 'clipboard',
   label: 'Clipboard',
   description: 'Remembers text you copy. Skips anything that looks like a password or key.',
@@ -58,8 +60,8 @@ module.exports = {
     return { ok: true };
   },
 
-  create() {
-    let timer = null;
+  create(): SourceInstance {
+    let timer: NodeJS.Timeout | null = null;
     let last = '';
     let captured = 0;
     let skipped = 0;
@@ -75,7 +77,7 @@ module.exports = {
         }
 
         timer = setInterval(() => {
-          let text;
+          let text: string;
           try {
             text = clipboard.readText();
           } catch {
@@ -114,7 +116,6 @@ module.exports = {
       },
     };
   },
-
-  // exported for the tests
-  _isSecret: isSecret,
 };
+
+export default source;

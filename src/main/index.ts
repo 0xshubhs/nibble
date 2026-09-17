@@ -1,16 +1,32 @@
-'use strict';
-const path = require('path');
-const { app, BrowserWindow, ipcMain, powerMonitor, shell, nativeTheme } = require('electron');
+import path from 'path';
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  nativeTheme,
+  powerMonitor,
+  shell,
+} from 'electron';
 
-const { initDataPath, dataPath } = require('./paths');
-const { Store } = require('./store');
-const { Scheduler, nextAfter, REPEATS } = require('./scheduler');
-const { AppTray } = require('./tray');
-const autostart = require('./autostart');
-const notifier = require('./notifier');
-const { Memory } = require('./memory');
-const { CaptureManager } = require('./capture');
-const { McpBridge } = require('./mcp/server');
+import { initDataPath, dataPath } from './paths';
+import { Store } from './store';
+import { Scheduler, nextAfter, isRepeat } from './scheduler';
+import { AppTray } from './tray';
+import * as autostart from './autostart';
+import * as notifier from './notifier';
+import { Memory } from './memory';
+import { CaptureManager } from './capture';
+import { McpBridge } from './mcp/server';
+import type {
+  BackendConfig,
+  CaptureSourceId,
+  Reminder,
+  ReminderInput,
+  SearchOptions,
+  Settings,
+  Snapshot,
+} from '../types';
 
 // Windows needs this before any notification is shown, or toasts are
 // attributed to "electron.app.Electron" and may not appear at all.
@@ -26,18 +42,18 @@ if (!app.requestSingleInstanceLock()) {
   process.exit(0);
 }
 
-let store;
-let scheduler;
-let tray;
-let memory;
-let capture;
-let mcp;
-let win = null;
+let store: Store;
+let scheduler: Scheduler;
+let tray: AppTray | null = null;
+let memory: Memory | null = null;
+let capture: CaptureManager | null = null;
+let mcp: McpBridge | null = null;
+let win: BrowserWindow | null = null;
 let quitting = false;
 
 /* ---------------- window ---------------- */
 
-function createWindow({ show }) {
+function createWindow({ show }: { show: boolean }): BrowserWindow {
   win = new BrowserWindow({
     width: 880,
     height: 660,
@@ -59,24 +75,24 @@ function createWindow({ show }) {
     },
   });
 
-  win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+  void win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 
   win.once('ready-to-show', () => {
-    if (show) win.show();
-    maybeScreenshot();
+    if (show) win?.show();
+    void maybeScreenshot();
   });
 
   // The close button hides the window; only an explicit Quit really exits.
   win.on('close', (e) => {
     if (quitting) return;
     e.preventDefault();
-    win.hide();
+    win?.hide();
     if (process.platform === 'darwin' && !store.settings.showInDock) app.dock?.hide();
   });
 
   // Anything that is not our own page opens in the real browser.
   win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    void shell.openExternal(url);
     return { action: 'deny' };
   });
 
@@ -84,90 +100,80 @@ function createWindow({ show }) {
 }
 
 /**
- * Development helper: `--screenshot=<file> [--tab=memory] [--wait=ms]` renders
- * the window off-screen, captures it and exits. Capturing from inside the app
+ * Development helper: `--screenshot=<file> [--tab=memory] [--query=...]`
+ * renders the window, captures it and exits. Capturing from inside the app
  * beats a screen grab, which picks up whatever else is in front.
  */
-function maybeScreenshot() {
+async function maybeScreenshot(): Promise<void> {
   if (app.isPackaged) return;
   const arg = process.argv.find((a) => a.startsWith('--screenshot='));
-  if (!arg) return;
+  if (!arg || !win) return;
 
   const file = arg.slice('--screenshot='.length);
-  const tab = (process.argv.find((a) => a.startsWith('--tab=')) || '--tab=reminders').slice(6);
-  const wait = Number((process.argv.find((a) => a.startsWith('--wait=')) || '--wait=1200').slice(7));
+  const tab = (process.argv.find((a) => a.startsWith('--tab=')) ?? '--tab=reminders').slice(6);
+  const wait = Number((process.argv.find((a) => a.startsWith('--wait=')) ?? '--wait=1200').slice(7));
+  const query = (process.argv.find((a) => a.startsWith('--query=')) ?? '--query=').slice(8);
+  const scroll = Number(
+    (process.argv.find((a) => a.startsWith('--scroll=')) ?? '--scroll=0').slice(9)
+  );
 
-  win.webContents.on('console-message', (_e, level, message) => {
-    console.log('RENDERER[' + level + '] ' + message);
-  });
-
-  setTimeout(async () => {
-    try {
-      const query = (process.argv.find((a) => a.startsWith('--query=')) || '--query=').slice(8);
-      const scroll = Number((process.argv.find((a) => a.startsWith('--scroll=')) || '--scroll=0').slice(9));
-      const info = await win.webContents.executeJavaScript(
-        `(() => {
-           const b = document.querySelector('[data-tab="${tab}"]');
-           if (b) b.click();
-           const q = ${JSON.stringify(query)};
-           if (q) {
-             const box = document.getElementById('m-q');
-             if (box) { box.value = q; box.dispatchEvent(new Event('input', { bubbles: true })); }
-           }
-           window.scrollTo(0, ${scroll});
-           return { found: !!b, active: document.querySelector('.panel.is-active')?.id };
-         })()`
-      );
-      console.log('SHOT_CLICK ' + JSON.stringify(info));
-      // An occluded window composites lazily, so bring it up and give it a
-      // beat before capturing or the frame is the previous tab.
-      win.showInactive();
-      win.moveTop();
-      await new Promise((r) => setTimeout(r, 1200));
-      const img = await win.webContents.capturePage();
-      require('fs').writeFileSync(file, img.toPNG());
-      console.log('SHOT ' + file);
-    } catch (err) {
-      console.log('SHOT_FAIL ' + err.message);
-    }
-    quitting = true;
-    app.exit(0);
+  setTimeout(() => {
+    void (async () => {
+      try {
+        if (!win) return;
+        await win.webContents.executeJavaScript(
+          `(() => {
+             const b = document.querySelector('[data-tab="${tab}"]');
+             if (b) b.click();
+             const q = ${JSON.stringify(query)};
+             if (q) {
+               const box = document.getElementById('m-q');
+               if (box) { box.value = q; box.dispatchEvent(new Event('input', { bubbles: true })); }
+             }
+             window.scrollTo(0, ${scroll});
+             return true;
+           })()`
+        );
+        // An occluded window composites lazily, so bring it up and give it a
+        // beat before capturing or the frame is the previous tab.
+        win.showInactive();
+        win.moveTop();
+        await new Promise((r) => setTimeout(r, 1200));
+        const img = await win.webContents.capturePage();
+        (await import('fs')).writeFileSync(file, img.toPNG());
+        console.log(`SHOT ${file}`);
+      } catch (err) {
+        console.log(`SHOT_FAIL ${err instanceof Error ? err.message : String(err)}`);
+      }
+      quitting = true;
+      app.exit(0);
+    })();
   }, wait);
 }
 
-function showWindow(focusId) {
+function showWindow(focusId?: string): void {
   if (!win || win.isDestroyed()) createWindow({ show: true });
+  if (!win) return;
   if (process.platform === 'darwin') app.dock?.show();
   if (win.isMinimized()) win.restore();
   win.show();
   win.focus();
-  if (focusId) {
-    win.webContents.send('focus-reminder', focusId);
-  }
+  if (focusId) win.webContents.send('focus-reminder', focusId);
 }
 
 /* ---------------- sync helpers ---------------- */
-
-function pushState() {
-  tray?.render();
-  // The webContents can be torn down a beat before the window is, so checking
-  // only the window logs "Render frame was disposed" noise on every quit.
-  if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
-    win.webContents.send('state', snapshot());
-  }
-}
 
 /**
  * Absolute path to the stdio relay, which is what a client actually spawns.
  * In a packaged app it lives beside the archive rather than inside it, because
  * a plain `node` cannot read files out of an asar.
  */
-function relayPath() {
+function relayPath(): string {
   const p = path.join(__dirname, '..', 'mcp', 'stdio.js');
   return app.isPackaged ? p.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`) : p;
 }
 
-function snapshot() {
+function snapshot(): Snapshot {
   return {
     reminders: store.reminders,
     settings: { ...store.settings, launchAtLogin: autostart.isEnabled() },
@@ -180,15 +186,25 @@ function snapshot() {
       notifications: notifier.supported(),
       relay: relayPath(),
     },
-    memory: memory
-      ? {
-          stats: memory.stats(),
-          sources: capture.list(),
-          paused: capture.paused,
-          mcp: mcp.info(),
-        }
-      : null,
+    memory:
+      memory && capture && mcp
+        ? {
+            stats: memory.stats(),
+            sources: capture.list(),
+            paused: capture.paused,
+            mcp: mcp.info(),
+          }
+        : null,
   };
+}
+
+function pushState(): void {
+  tray?.render();
+  // The webContents can be torn down a beat before the window is, so checking
+  // only the window logs "Render frame was disposed" noise on every quit.
+  if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) {
+    win.webContents.send('state', snapshot());
+  }
 }
 
 /* ---------------- reminders ---------------- */
@@ -198,11 +214,11 @@ function snapshot() {
  * tool both come through here, so an assistant-scheduled reminder gets exactly
  * the same validation and roll-forward as one typed into the UI.
  */
-function saveReminder(input) {
+function saveReminder(input: ReminderInput): Reminder {
   const now = Date.now();
   const existing = input.id ? store.find(input.id) : null;
 
-  const repeat = REPEATS.has(input.repeat) ? input.repeat : 'none';
+  const repeat = isRepeat(input.repeat) ? input.repeat : 'none';
   let at = Number(input.at);
   if (!Number.isFinite(at)) throw new Error('invalid time');
 
@@ -213,17 +229,17 @@ function saveReminder(input) {
     if (next !== null) at = next;
   }
 
-  const reminder = {
-    id: existing?.id || `r_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-    title: String(input.title || '').trim() || 'Reminder',
-    body: String(input.body || '').trim(),
+  const reminder: Reminder = {
+    id: existing?.id ?? `r_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+    title: String(input.title ?? '').trim() || 'Reminder',
+    body: String(input.body ?? '').trim(),
     at,
     repeat,
     intervalMinutes: Math.max(1, Number(input.intervalMinutes) || 60),
     enabled: input.enabled !== false,
     snoozedUntil: null,
-    createdAt: existing?.createdAt || now,
-    lastFiredAt: existing?.lastFiredAt || null,
+    createdAt: existing?.createdAt ?? now,
+    lastFiredAt: existing?.lastFiredAt ?? null,
   };
 
   store.upsert(reminder);
@@ -234,19 +250,19 @@ function saveReminder(input) {
 
 /* ---------------- ipc ---------------- */
 
-function registerIpc() {
+function registerIpc(): void {
   ipcMain.handle('state:get', () => snapshot());
 
-  ipcMain.handle('reminder:save', (_e, input) => saveReminder(input));
+  ipcMain.handle('reminder:save', (_e, input: ReminderInput) => saveReminder(input));
 
-  ipcMain.handle('reminder:delete', (_e, id) => {
+  ipcMain.handle('reminder:delete', (_e, id: string) => {
     store.remove(id);
     scheduler.arm();
     pushState();
     return true;
   });
 
-  ipcMain.handle('reminder:toggle', (_e, id, enabled) => {
+  ipcMain.handle('reminder:toggle', (_e, id: string, enabled: boolean) => {
     const r = store.find(id);
     if (!r) return null;
     r.enabled = Boolean(enabled);
@@ -262,15 +278,15 @@ function registerIpc() {
     return r;
   });
 
-  ipcMain.handle('reminder:snooze', (_e, id, minutes) => {
+  ipcMain.handle('reminder:snooze', (_e, id: string, minutes: number) => {
     const r = scheduler.snooze(id, Number(minutes) || store.settings.snoozeMinutes);
     pushState();
     return r;
   });
 
-  ipcMain.handle('reminder:test', (_e, id) => {
-    const r = store.find(id);
-    notifier.fire(r || { title: app.getName(), body: 'Notifications are working.' }, {
+  ipcMain.handle('reminder:test', (_e, id: string | null) => {
+    const r = id ? store.find(id) : null;
+    notifier.fire(r ?? { title: app.getName(), body: 'Notifications are working.' }, {
       sound: store.settings.notificationSound,
       snoozeMinutes: store.settings.snoozeMinutes,
       onOpen: (rid) => showWindow(rid),
@@ -282,7 +298,7 @@ function registerIpc() {
     return notifier.supported();
   });
 
-  ipcMain.handle('settings:set', (_e, key, value) => {
+  ipcMain.handle('settings:set', <K extends keyof Settings>(_e: unknown, key: K, value: Settings[K]) => {
     if (key === 'launchAtLogin') {
       autostart.setEnabled(Boolean(value), { hidden: store.settings.startHidden });
       store.setSetting('launchAtLogin', autostart.isEnabled());
@@ -303,46 +319,54 @@ function registerIpc() {
 
   /* ---- memory ---- */
 
-  ipcMain.handle('memory:search', (_e, query, opts) => memory.search(query, opts || {}));
-  ipcMain.handle('memory:recent', (_e, limit, source) => memory.recent(limit || 20, source || null));
-  ipcMain.handle('memory:stats', () => memory.stats());
+  ipcMain.handle('memory:search', (_e, query: string, opts?: SearchOptions) =>
+    memory?.search(query, opts ?? {}) ?? []
+  );
+  ipcMain.handle('memory:recent', (_e, limit?: number, source?: string | null) =>
+    memory?.recent(limit ?? 20, source ?? null) ?? []
+  );
+  ipcMain.handle('memory:stats', () => memory?.stats() ?? null);
 
-  ipcMain.handle('memory:capture', (_e, item) => {
-    const res = memory.capture({ source: 'manual', kind: 'note', ...item });
+  ipcMain.handle('memory:capture', (_e, item: { text: string; title?: string }) => {
+    const res = memory?.capture({ source: 'manual', kind: 'note', ...item }) ?? {
+      added: 0,
+      skipped: 'not-ready',
+    };
     pushState();
     return res;
   });
 
-  ipcMain.handle('memory:forget', (_e, id) => {
-    const ok = memory.forget(id);
+  ipcMain.handle('memory:forget', (_e, id: string) => {
+    const ok = memory?.forget(id) ?? false;
     pushState();
     return ok;
   });
 
-  ipcMain.handle('memory:forget-source', (_e, source) => {
-    const n = memory.forgetSource(source);
+  ipcMain.handle('memory:forget-source', (_e, source: string) => {
+    const n = memory?.forgetSource(source) ?? 0;
     pushState();
     return n;
   });
 
   ipcMain.handle('memory:compact', () => {
-    const n = memory.compact();
+    const n = memory?.compact() ?? 0;
     pushState();
     return n;
   });
 
-  ipcMain.handle('memory:set-backend', async (_e, cfg) => {
-    store.setSetting('embedBackend', cfg.backend);
+  ipcMain.handle('memory:set-backend', async (_e, cfg: BackendConfig) => {
+    if (cfg.backend) store.setSetting('embedBackend', cfg.backend);
     if (cfg.provider) store.setSetting('embedProvider', cfg.provider);
     if (cfg.apiKey !== undefined) store.setSetting('embedApiKey', cfg.apiKey);
-    const stats = await memory.setBackend(cfg);
+    const stats = await memory?.setBackend(cfg);
     pushState();
-    return stats;
+    return stats ?? null;
   });
 
   /* ---- capture ---- */
 
-  ipcMain.handle('capture:set', (_e, id, enabled) => {
+  ipcMain.handle('capture:set', (_e, id: CaptureSourceId, enabled: boolean) => {
+    if (!capture) return { ok: false, error: 'capture not ready', sources: [] };
     const sources = { ...store.settings.captureSources, [id]: Boolean(enabled) };
     store.setSetting('captureSources', sources);
     const res = enabled ? capture.start(id) : capture.stop(id);
@@ -354,60 +378,60 @@ function registerIpc() {
     return { ...res, sources: capture.list() };
   });
 
-  ipcMain.handle('capture:pause', (_e, paused) => {
+  ipcMain.handle('capture:pause', (_e, paused: boolean) => {
+    if (!capture) return false;
     store.setSetting('capturePaused', capture.setPaused(paused));
     pushState();
     return capture.paused;
   });
 
-  ipcMain.handle('capture:permission', async (_e, id) => {
-    const res = await capture.requestPermission(id);
+  ipcMain.handle('capture:permission', async (_e, id: CaptureSourceId) => {
+    const res = (await capture?.requestPermission(id)) ?? { granted: false, status: 'unavailable' };
     pushState();
     return res;
   });
 
   ipcMain.handle('capture:add-folder', async () => {
-    const { dialog } = require('electron');
-    const picked = await dialog.showOpenDialog(win, {
+    const picked = await dialog.showOpenDialog(win!, {
       title: 'Choose a folder to remember',
       properties: ['openDirectory', 'createDirectory'],
     });
     if (picked.canceled || !picked.filePaths.length) return store.settings.memoryFolders;
     const folders = [...new Set([...store.settings.memoryFolders, ...picked.filePaths])];
     store.setSetting('memoryFolders', folders);
-    capture.refresh('files');
+    capture?.refresh('files');
     pushState();
     return folders;
   });
 
-  ipcMain.handle('capture:remove-folder', (_e, folder) => {
+  ipcMain.handle('capture:remove-folder', (_e, folder: string) => {
     const folders = store.settings.memoryFolders.filter((f) => f !== folder);
     store.setSetting('memoryFolders', folders);
-    capture.refresh('files');
+    capture?.refresh('files');
     pushState();
     return folders;
   });
 
   /* ---- mcp connector ---- */
 
-  ipcMain.handle('mcp:set', async (_e, enabled) => {
+  ipcMain.handle('mcp:set', async (_e, enabled: boolean) => {
     store.setSetting('mcpEnabled', Boolean(enabled));
-    if (enabled) {
+    if (enabled && mcp) {
       const info = await mcp.start();
-      store.setSetting('mcpPort', info.port || store.settings.mcpPort);
-      store.setSetting('mcpToken', info.token);
+      store.setSetting('mcpPort', info.port ?? store.settings.mcpPort);
+      store.setSetting('mcpToken', info.token ?? '');
     } else {
-      mcp.stop();
+      mcp?.stop();
     }
     pushState();
-    return mcp.info();
+    return mcp?.info() ?? null;
   });
 
   ipcMain.handle('mcp:regenerate', () => {
-    const info = mcp.regenerateToken();
-    store.setSetting('mcpToken', info.token);
+    const info = mcp?.regenerateToken();
+    if (info) store.setSetting('mcpToken', info.token ?? '');
     pushState();
-    return info;
+    return info ?? null;
   });
 
   ipcMain.handle('app:reveal-data', () => shell.openPath(dataPath().dir));
@@ -419,7 +443,7 @@ function registerIpc() {
 
 /* ---------------- lifecycle ---------------- */
 
-app.whenReady().then(() => {
+void app.whenReady().then(() => {
   store = new Store();
   scheduler = new Scheduler(store);
 
@@ -438,7 +462,7 @@ app.whenReady().then(() => {
 
   tray = new AppTray({
     store,
-    onShow: (id) => showWindow(id === 'new' ? 'new' : id),
+    onShow: (id) => showWindow(id),
     onQuit: () => {
       quitting = true;
       app.quit();
@@ -458,7 +482,7 @@ app.whenReady().then(() => {
     settings: () => store.settings,
     reminders: {
       list: () =>
-        [...store.reminders].sort((a, b) => (a.snoozedUntil || a.at) - (b.snoozedUntil || b.at)),
+        [...store.reminders].sort((a, b) => (a.snoozedUntil ?? a.at) - (b.snoozedUntil ?? b.at)),
       add: (input) => saveReminder(input),
     },
   });
@@ -470,23 +494,26 @@ app.whenReady().then(() => {
 
   // The model load and the first index pass must not hold up the window or
   // the reminder scheduler, so this is deliberately not awaited.
-  memory
+  void memory
     .start()
-    .then(() => {
-      capture.setPaused(store.settings.capturePaused);
-      capture.sync();
+    .then(async () => {
+      capture?.setPaused(store.settings.capturePaused);
+      capture?.sync();
       if (store.settings.retentionDays || store.settings.maxChunks) {
-        memory.prune({ days: store.settings.retentionDays || null, maxChunks: store.settings.maxChunks || null });
-      }
-      if (store.settings.mcpEnabled) {
-        return mcp.start().then((info) => {
-          store.setSetting('mcpPort', info.port || store.settings.mcpPort);
-          store.setSetting('mcpToken', info.token);
+        memory?.prune({
+          days: store.settings.retentionDays || null,
+          maxChunks: store.settings.maxChunks || null,
         });
       }
-      return null;
+      if (store.settings.mcpEnabled && mcp) {
+        const info = await mcp.start();
+        store.setSetting('mcpPort', info.port ?? store.settings.mcpPort);
+        store.setSetting('mcpToken', info.token ?? '');
+      }
     })
-    .catch(() => { /* surfaced through the status event */ })
+    .catch(() => {
+      /* surfaced through the status event */
+    })
     .finally(() => pushState());
 
   registerIpc();
@@ -509,8 +536,12 @@ app.whenReady().then(() => {
 
 app.on('second-instance', () => showWindow());
 
-// The whole point is to keep running with no windows open.
-app.on('window-all-closed', (e) => e?.preventDefault?.());
+// The whole point is to keep running with no windows open. Electron quits by
+// itself only when nothing is subscribed here, so an empty handler is what
+// keeps the app alive -- there is no event to cancel.
+app.on('window-all-closed', () => {
+  /* stay in the tray */
+});
 
 app.on('activate', () => showWindow());
 

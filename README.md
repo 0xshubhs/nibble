@@ -7,14 +7,24 @@ any LLM over MCP — plus reminders that fire as real system notifications.
 One Electron codebase, three real builds: a `.dmg`, a portable `.exe` and an
 `.AppImage`. No account, no server, no telemetry.
 
+Written in TypeScript, strict mode, no bundler — plain `tsc` to `out/`.
+
 ```
 npm install
-npm start           # run it
+npm start           # compile, then run
+npm run watch       # tsc --watch while developing
+npm run typecheck   # no emit
 npm test            # store + search tests
 npm run build:mac   # .dmg + .zip     (arm64 + x64)
 npm run build:win   # portable .exe + setup + .zip
 npm run build:linux # .AppImage + .deb + .tar.gz
 ```
+
+`rootDir` is `src` and `outDir` is `out`, so every file compiles to the same
+depth it was written at — `src/main/index.ts` becomes `out/main/index.js`. The
+main process resolves the preload, the renderer, the embedding worker and the
+MCP relay through `__dirname`, and this keeps all of those paths correct
+without a single change between running from source and running packaged.
 
 Each target must be built on its own OS. `.github/workflows/build.yml` runs the
 three natively and attaches the results to a GitHub release when you push a tag.
@@ -134,26 +144,35 @@ is in use.
 ## Layout
 
 ```
-src/main/index.js       app wiring, windows, IPC
-src/main/scheduler.js   the reminder clock (chunked timers, DST-safe repeats)
-src/main/store.js       settings and reminders
-src/main/paths.js       portable-vs-installed data directory
-src/main/autostart.js   login items: LaunchServices / Run key / XDG autostart
-src/main/tray.js        menu bar icon and menu
-src/main/notifier.js    native notifications
+src/types.ts            every shape that crosses a boundary
+src/main/index.ts       app wiring, windows, IPC
+src/main/scheduler.ts   the reminder clock (chunked timers, DST-safe repeats)
+src/main/store.ts       settings and reminders
+src/main/paths.ts       portable-vs-installed data directory
+src/main/autostart.ts   login items: LaunchServices / Run key / XDG autostart
+src/main/tray.ts        menu bar icon and menu
+src/main/notifier.ts    native notifications
 
 src/main/memory/        chunker, store, hybrid search, embedder
-src/main/memory/embed-worker.js   the model, in its own process
+src/main/memory/embed-worker.ts   the model, in its own process
 src/main/capture/       capture sources behind one interface
-src/main/mcp/server.js  loopback MCP server
-src/mcp/stdio.js        dependency-free relay for stdio clients
+src/main/mcp/server.ts  loopback MCP server
+src/mcp/stdio.ts        dependency-free relay for stdio clients
 
-src/preload.js          the only bridge into the renderer
+src/preload.ts          the only bridge into the renderer
 src/renderer/           the window UI (no framework)
-scripts/make-icons.js   generates every icon from code, no image deps
+src/renderer/env.d.ts   ambient types; the renderer stays a script, not a module
+src/test/               store and search tests
+
+scripts/make-icons.js   generates the mouse mascot from code, no image deps
+scripts/adhoc-sign.js   ad-hoc signs unsigned macOS builds so they will launch
+scripts/copy-assets.js  the renderer's html/css, which tsc does not emit
 site/                   the landing page
-test/                   store and search tests
 ```
+
+`RendererApi` in `src/types.ts` is implemented by `src/preload.ts` and declared
+as `window.api` for the renderer, so adding a channel on one side without the
+other is a compile error rather than a runtime `undefined`.
 
 ## Development
 

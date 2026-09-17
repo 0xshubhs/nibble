@@ -1,8 +1,7 @@
-'use strict';
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { app } = require('electron');
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { app } from 'electron';
 
 /**
  * "Start when I log in" across three very different mechanisms:
@@ -13,19 +12,18 @@ const { app } = require('electron');
  * Electron's setLoginItemSettings is a no-op on Linux, hence the manual file.
  */
 
-const DESKTOP_FILE = path.join(
+export const DESKTOP_FILE = path.join(
   process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'),
   'autostart',
   'nibble.desktop'
 );
 
 /** The command that actually relaunches us, AppImage-aware. */
-function launchTarget() {
-  if (process.env.APPIMAGE) return process.env.APPIMAGE;
-  return process.execPath;
+function launchTarget(): string {
+  return process.env.APPIMAGE || process.execPath;
 }
 
-function linuxSet(enabled, { hidden }) {
+function linuxSet(enabled: boolean, hidden: boolean): void {
   if (!enabled) {
     fs.rmSync(DESKTOP_FILE, { force: true });
     return;
@@ -36,7 +34,7 @@ function linuxSet(enabled, { hidden }) {
     'Type=Application',
     'Version=1.0',
     `Name=${app.getName()}`,
-    'Comment=Reminders that keep running in the background',
+    'Comment=An on-device memory your LLM can search',
     `Exec=${exec}`,
     'Terminal=false',
     'X-GNOME-Autostart-enabled=true',
@@ -46,17 +44,17 @@ function linuxSet(enabled, { hidden }) {
   fs.writeFileSync(DESKTOP_FILE, body, { mode: 0o644 });
 }
 
-function isEnabled() {
+export function isEnabled(): boolean {
   if (process.platform === 'linux') return fs.existsSync(DESKTOP_FILE);
   return app.getLoginItemSettings({ path: launchTarget() }).openAtLogin;
 }
 
-function setEnabled(enabled, { hidden = true } = {}) {
+export function setEnabled(enabled: boolean, { hidden = true }: { hidden?: boolean } = {}): boolean {
   // A portable build launched from removable media would point the login item
   // at a path that may not exist next boot, but that is the user's call --
   // we just record it faithfully.
   if (process.platform === 'linux') {
-    linuxSet(enabled, { hidden });
+    linuxSet(enabled, hidden);
   } else if (process.platform === 'win32') {
     app.setLoginItemSettings({
       openAtLogin: enabled,
@@ -64,21 +62,16 @@ function setEnabled(enabled, { hidden = true } = {}) {
       args: hidden ? ['--hidden'] : [],
     });
   } else {
-    app.setLoginItemSettings({
-      openAtLogin: enabled,
-      openAsHidden: hidden,
-    });
+    app.setLoginItemSettings({ openAtLogin: enabled, openAsHidden: hidden });
   }
   return isEnabled();
 }
 
 /** True when this launch came from the login item rather than the user. */
-function launchedAtLogin() {
+export function launchedAtLogin(): boolean {
   if (process.argv.includes('--hidden')) return true;
   if (process.platform === 'darwin') {
     return app.getLoginItemSettings().wasOpenedAtLogin === true;
   }
   return false;
 }
-
-module.exports = { isEnabled, setEnabled, launchedAtLogin, DESKTOP_FILE };

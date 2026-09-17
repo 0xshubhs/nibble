@@ -1,11 +1,15 @@
-'use strict';
-const { contextBridge, ipcRenderer } = require('electron');
+import { contextBridge, ipcRenderer } from 'electron';
+import type { RendererApi } from './types';
 
 /**
  * The only surface the renderer gets. Node stays off, context isolation
  * stays on, and every call is an explicit, named channel.
+ *
+ * Typing this as RendererApi is what keeps the two sides honest: the same
+ * interface is what `window.api` is declared as in the renderer, so adding a
+ * channel on one side without the other is a compile error.
  */
-contextBridge.exposeInMainWorld('api', {
+const api: RendererApi = {
   getState: () => ipcRenderer.invoke('state:get'),
 
   saveReminder: (input) => ipcRenderer.invoke('reminder:save', input),
@@ -36,17 +40,20 @@ contextBridge.exposeInMainWorld('api', {
   // --- mcp connector ---
   setMcp: (enabled) => ipcRenderer.invoke('mcp:set', enabled),
   regenerateMcpToken: () => ipcRenderer.invoke('mcp:regenerate'),
+
   revealData: () => ipcRenderer.invoke('app:reveal-data'),
   quit: () => ipcRenderer.invoke('app:quit'),
 
   onState: (cb) => {
-    const h = (_e, state) => cb(state);
+    const h = (_e: Electron.IpcRendererEvent, state: Parameters<typeof cb>[0]): void => cb(state);
     ipcRenderer.on('state', h);
     return () => ipcRenderer.off('state', h);
   },
   onFocusReminder: (cb) => {
-    const h = (_e, id) => cb(id);
+    const h = (_e: Electron.IpcRendererEvent, id: string): void => cb(id);
     ipcRenderer.on('focus-reminder', h);
     return () => ipcRenderer.off('focus-reminder', h);
   },
-});
+};
+
+contextBridge.exposeInMainWorld('api', api);

@@ -1,5 +1,5 @@
-'use strict';
-const { EventEmitter } = require('events');
+import { EventEmitter } from 'events';
+import type { Reminder, Repeat } from '../types';
 
 // setTimeout overflows past 2^31-1 ms (~24.8 days) and fires immediately,
 // so long waits are served in chunks.
@@ -7,14 +7,25 @@ const MAX_CHUNK = 2 ** 31 - 1;
 // Cheap safety net: timers drift or fire late across sleep/wake, so sweep anyway.
 const SWEEP_MS = 30_000;
 
-const REPEATS = new Set(['none', 'hourly', 'daily', 'weekdays', 'weekly', 'custom']);
+export const REPEATS: ReadonlySet<string> = new Set<Repeat>([
+  'none',
+  'hourly',
+  'daily',
+  'weekdays',
+  'weekly',
+  'custom',
+]);
+
+export function isRepeat(value: unknown): value is Repeat {
+  return typeof value === 'string' && REPEATS.has(value);
+}
 
 /**
  * Moves a timestamp forward by one repeat step, using local-calendar
  * arithmetic so a daily 9am reminder stays at 9am across a DST change
  * instead of drifting to 8am or 10am.
  */
-function step(ts, repeat, intervalMinutes) {
+export function step(ts: number, repeat: Repeat, intervalMinutes?: number): number | null {
   const d = new Date(ts);
   switch (repeat) {
     case 'hourly':
@@ -41,40 +52,58 @@ function step(ts, repeat, intervalMinutes) {
 }
 
 /** First occurrence strictly after `now`. Returns null for one-shot reminders. */
-function nextAfter(ts, now, repeat, intervalMinutes) {
-  if (!REPEATS.has(repeat) || repeat === 'none') return null;
+export function nextAfter(
+  ts: number,
+  now: number,
+  repeat: unknown,
+  intervalMinutes?: number
+): number | null {
+  if (!isRepeat(repeat) || repeat === 'none') return null;
   let next = ts;
   // Bounded so a corrupt interval can never spin forever.
   for (let i = 0; i < 100_000; i++) {
-    next = step(next, repeat, intervalMinutes);
-    if (next === null) return null;
+    const advanced = step(next, repeat, intervalMinutes);
+    if (advanced === null) return null;
+    next = advanced;
     if (next > now) return next;
   }
   return null;
 }
 
 /** When a reminder actually wants to ring: its snooze, or its scheduled time. */
-function dueAt(r) {
+export function dueAt(r: Reminder): number | null {
   if (!r.enabled) return null;
   // A snooze overrides the scheduled time until it is consumed by a tick.
   if (r.snoozedUntil) return r.snoozedUntil;
   return r.at;
 }
 
-class Scheduler extends EventEmitter {
-  constructor(store) {
+/** The slice of the settings store the scheduler needs. */
+export interface SchedulerStore {
+  readonly reminders: Reminder[];
+  find(id: string): Reminder | null;
+  save(): void;
+}
+
+export interface SchedulerEvents {
+  fire: [Reminder];
+  changed: [];
+}
+
+export class Scheduler extends EventEmitter<SchedulerEvents> {
+  private timer: NodeJS.Timeout | null = null;
+  private sweep: NodeJS.Timeout | null = null;
+
+  constructor(private readonly store: SchedulerStore) {
     super();
-    this.store = store;
-    this.timer = null;
-    this.sweep = null;
   }
 
-  start() {
+  start(): void {
     this.sweep = setInterval(() => this.tick(), SWEEP_MS);
     this.tick();
   }
 
-  stop() {
+  stop(): void {
     if (this.timer) clearTimeout(this.timer);
     if (this.sweep) clearInterval(this.sweep);
     this.timer = null;
@@ -82,7 +111,7 @@ class Scheduler extends EventEmitter {
   }
 
   /** Fires everything that is due, rolls repeats forward, re-arms the timer. */
-  tick() {
+  tick(): void {
     const now = Date.now();
     let changed = false;
 
@@ -111,7 +140,7 @@ class Scheduler extends EventEmitter {
   }
 
   /** Sleeps until the soonest due reminder, in <=24-day chunks. */
-  arm() {
+  arm(): void {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
 
@@ -129,7 +158,7 @@ class Scheduler extends EventEmitter {
     this.timer = setTimeout(() => this.tick(), wait);
   }
 
-  snooze(id, minutes) {
+  snooze(id: string, minutes: number): Reminder | null {
     const r = this.store.find(id);
     if (!r) return null;
     r.snoozedUntil = Date.now() + Math.max(1, minutes) * 60_000;
@@ -139,5 +168,3 @@ class Scheduler extends EventEmitter {
     return r;
   }
 }
-
-module.exports = { Scheduler, nextAfter, step, dueAt, REPEATS };

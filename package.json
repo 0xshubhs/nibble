@@ -3,7 +3,7 @@
   "productName": "Nibble",
   "version": "0.1.0",
   "description": "Portable, background-running cross-platform desktop app with native notifications and reminders.",
-  "main": "src/main/index.js",
+  "main": "out/main/index.js",
   "author": {
     "name": "0xshubhs",
     "email": "shubht3303@gmail.com"
@@ -15,20 +15,25 @@
     "url": "https://github.com/0xshubhs/nibble.git"
   },
   "scripts": {
-    "start": "electron .",
-    "dev": "electron . --dev",
+    "build:ts": "tsc -p tsconfig.json && node scripts/copy-assets.js",
+    "watch": "tsc -p tsconfig.json --watch",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "npm run build:ts && electron .",
+    "dev": "npm run build:ts && electron . --dev",
+    "test": "npm run build:ts && node out/test/store.test.js",
     "icons": "node scripts/make-icons.js",
-    "pack": "electron-builder --dir",
-    "build": "electron-builder",
-    "build:mac": "electron-builder --mac",
-    "build:win": "electron-builder --win",
-    "build:linux": "electron-builder --linux",
-    "build:all": "electron-builder --mac --win --linux",
-    "test": "node test/store.test.js"
+    "clean": "rm -rf out dist",
+    "pack": "npm run build:ts && electron-builder --dir",
+    "build": "npm run build:ts && electron-builder",
+    "build:mac": "npm run build:ts && electron-builder --mac",
+    "build:win": "npm run build:ts && electron-builder --win",
+    "build:linux": "npm run build:ts && electron-builder --linux"
   },
   "devDependencies": {
+    "@types/node": "^22.20.3",
     "electron": "^32.2.0",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.3.0",

@@ -1,14 +1,35 @@
-'use strict';
-const path = require('path');
-const crypto = require('crypto');
-const { EventEmitter } = require('events');
+import path from 'path';
+import crypto from 'crypto';
+import { EventEmitter } from 'events';
 
-const { MemoryStore } = require('./store');
-const { Embedder } = require('./embedder');
-const { chunk, normalize } = require('./chunker');
+import { MemoryStore } from './store';
+import { Embedder } from './embedder';
+import { chunk, normalize } from './chunker';
+import type {
+  BackendConfig,
+  CaptureItem,
+  CaptureResult,
+  MemoryInput,
+  MemoryStatsWithEmbedder,
+  SearchHit,
+  SearchOptions,
+  Settings,
+  StatusEvent,
+} from '../../types';
 
 const BATCH = 16;
 const IDLE_MS = 120;
+
+interface MemoryEvents {
+  status: [StatusEvent];
+  indexed: [ReturnType<MemoryStore['stats']>];
+  captured: [{ source: string; chunks: number; title: string }];
+}
+
+export interface MemoryOptions {
+  dir: string;
+  settings: Settings;
+}
 
 /**
  * The memory: capture goes in, search comes out.
@@ -19,47 +40,56 @@ const IDLE_MS = 120;
  * downloading, or a cloud key that is missing, degrades search quality
  * instead of dropping data on the floor.
  */
-class Memory extends EventEmitter {
-  constructor({ dir, settings }) {
+export class Memory extends EventEmitter<MemoryEvents> {
+  private readonly dir: string;
+  private readonly settings: Settings;
+
+  embedder: Embedder;
+  store: MemoryStore;
+
+  private draining = false;
+  private stopped = false;
+  private seen = new Map<string, number>();
+  private wired = false;
+
+  constructor({ dir, settings }: MemoryOptions) {
     super();
     this.dir = dir;
     this.settings = settings;
 
     this.embedder = new Embedder({
       cacheDir: path.join(dir, 'models'),
-      backend: settings.embedBackend || 'local',
-      provider: settings.embedProvider || 'gemini',
-      apiKey: settings.embedApiKey || '',
+      backend: settings.embedBackend ?? 'local',
+      provider: settings.embedProvider ?? 'gemini',
+      apiKey: settings.embedApiKey ?? '',
       allowDownload: settings.allowModelDownload !== false,
     });
 
     this.store = new MemoryStore(path.join(dir, 'memory'), this.embedder.expectedDim()).load();
-
-    this._draining = false;
-    this._stopped = false;
-    this._seen = new Map(); // content hash -> ts, for dedupe
-    this._wired = false;
-
     this.embedder.on('status', (s) => this.emit('status', s));
   }
 
-  async start() {
-    await this.embedder.start().catch((e) => this.emit('status', { status: 'error', error: e.message }));
+  async start(): Promise<this> {
+    await this.embedder
+      .start()
+      .catch((e: unknown) =>
+        this.emit('status', { status: 'error', error: e instanceof Error ? e.message : String(e) })
+      );
 
     if (this.embedder.ready) {
       // A different model means the stored vectors describe a different space.
       const reset = this.store.ensureModel(this.embedder.currentModel());
       if (reset) this.emit('status', { status: 'reindexing' });
-      this._drain();
+      void this.drain();
     }
 
     // The local backend becomes ready asynchronously, after a download.
-    if (!this._wired) {
-      this._wired = true;
+    if (!this.wired) {
+      this.wired = true;
       this.embedder.on('status', (s) => {
         if (s.status === 'ready') {
           this.store.ensureModel(this.embedder.currentModel());
-          this._drain();
+          void this.drain();
         }
       });
     }
@@ -68,44 +98,35 @@ class Memory extends EventEmitter {
 
   /* ---------------- capture ---------------- */
 
-  /**
-   * @param {object} item
-   * @param {string} item.source  which capture source produced this
-   * @param {string} item.text
-   * @param {string} [item.title]
-   * @param {string} [item.kind]
-   * @param {object} [item.meta]
-   * @returns {{added: number, skipped: string|null}}
-   */
-  capture(item) {
+  capture(item: CaptureItem): CaptureResult {
     const text = normalize(item.text);
     if (!text) return { added: 0, skipped: 'empty' };
 
     // Ambient sources re-send the same content constantly (a clipboard that
     // has not changed, a window title that repeats). Hash-dedupe within a
     // window so the store does not fill with copies.
-    const hash = crypto.createHash('sha1').update(item.source + '|' + text).digest('hex');
-    const seenAt = this._seen.get(hash);
+    const hash = crypto.createHash('sha1').update(`${item.source}|${text}`).digest('hex');
+    const seenAt = this.seen.get(hash);
     const now = Date.now();
     if (seenAt && now - seenAt < 6 * 3600000) return { added: 0, skipped: 'duplicate' };
-    this._seen.set(hash, now);
-    if (this._seen.size > 5000) {
+    this.seen.set(hash, now);
+    if (this.seen.size > 5000) {
       // Cheap bound: keep the newest half rather than tracking a real LRU.
-      const entries = [...this._seen.entries()].sort((a, b) => b[1] - a[1]);
-      this._seen = new Map(entries.slice(0, 2500));
+      const entries = [...this.seen.entries()].sort((a, b) => b[1] - a[1]);
+      this.seen = new Map(entries.slice(0, 2500));
     }
 
     const pieces = chunk(text);
     if (!pieces.length) return { added: 0, skipped: 'too-short' };
 
-    const records = pieces.map((p, i) => ({
+    const records: MemoryInput[] = pieces.map((p, i) => ({
       id: `${hash.slice(0, 12)}_${i}`,
       source: item.source,
-      kind: item.kind || 'text',
-      title: item.title || '',
+      kind: item.kind ?? 'text',
+      title: item.title ?? '',
       text: p.text,
-      ts: item.ts || now,
-      meta: { ...(item.meta || {}), offset: p.offset, part: i, parts: pieces.length },
+      ts: item.ts ?? now,
+      meta: { ...(item.meta ?? {}), offset: p.offset, part: i, parts: pieces.length },
     }));
 
     // An id collision means identical content from the same source; skip it.
@@ -113,28 +134,31 @@ class Memory extends EventEmitter {
     if (!fresh.length) return { added: 0, skipped: 'duplicate' };
 
     this.store.add(fresh);
-    this.emit('captured', { source: item.source, chunks: fresh.length, title: item.title || '' });
-    this._drain();
+    this.emit('captured', { source: item.source, chunks: fresh.length, title: item.title ?? '' });
+    void this.drain();
     return { added: fresh.length, skipped: null };
   }
 
   /* ---------------- embedding queue ---------------- */
 
-  async _drain() {
-    if (this._draining || this._stopped || !this.embedder.ready) return;
-    this._draining = true;
+  private async drain(): Promise<void> {
+    if (this.draining || this.stopped || !this.embedder.ready) return;
+    this.draining = true;
 
     try {
       for (;;) {
-        if (this._stopped) break;
+        if (this.stopped) break;
         const batch = this.store.pending(BATCH);
         if (!batch.length) break;
 
-        let vectors;
+        let vectors: Float32Array[];
         try {
           vectors = await this.embedder.embed(batch.map((r) => r.text));
         } catch (err) {
-          this.emit('status', { status: 'error', error: err.message });
+          this.emit('status', {
+            status: 'error',
+            error: err instanceof Error ? err.message : String(err),
+          });
           break; // retried on the next capture or restart
         }
 
@@ -144,7 +168,10 @@ class Memory extends EventEmitter {
           if (v.length !== this.store.dim) {
             // The model produced a different width than the store was built
             // for; stop rather than writing rows that cannot be compared.
-            this.emit('status', { status: 'error', error: `vector width ${v.length} != store ${this.store.dim}` });
+            this.emit('status', {
+              status: 'error',
+              error: `vector width ${v.length} != store ${this.store.dim}`,
+            });
             return;
           }
           this.store.setVector(batch[i].row, v);
@@ -155,21 +182,17 @@ class Memory extends EventEmitter {
         await new Promise((r) => setTimeout(r, IDLE_MS));
       }
     } finally {
-      this._draining = false;
+      this.draining = false;
     }
   }
 
   /* ---------------- search ---------------- */
 
-  /**
-   * @param {string} query
-   * @param {object} [opts] k, since, source
-   */
-  async search(query, opts = {}) {
-    const q = String(query || '').trim();
+  async search(query: string, opts: SearchOptions = {}): Promise<SearchHit[]> {
+    const q = String(query ?? '').trim();
     if (!q) return [];
 
-    let vec = null;
+    let vec: Float32Array | null = null;
     if (this.embedder.ready) {
       try {
         const [v] = await this.embedder.embed([q]);
@@ -189,12 +212,16 @@ class Memory extends EventEmitter {
       meta: hit.rec.meta,
       score: hit.score,
       matched:
-        hit.vector !== null && hit.keyword !== null ? 'both' : hit.vector !== null ? 'meaning' : 'words',
+        hit.vector !== null && hit.keyword !== null
+          ? 'both'
+          : hit.vector !== null
+            ? 'meaning'
+            : 'words',
     }));
   }
 
-  recent(limit, source) {
-    return this.store.recent(limit, source).map((r) => ({
+  recent(limit?: number, source?: string | null): SearchHit[] {
+    return this.store.recent(limit, source ?? null).map((r) => ({
       id: r.id,
       source: r.source,
       kind: r.kind,
@@ -202,16 +229,18 @@ class Memory extends EventEmitter {
       text: r.text,
       ts: r.ts,
       meta: r.meta,
+      score: 0,
+      matched: 'words' as const,
     }));
   }
 
-  forget(id) {
+  forget(id: string): boolean {
     const ok = this.store.remove(id);
     if (ok) this.emit('indexed', this.store.stats());
     return ok;
   }
 
-  forgetSource(source) {
+  forgetSource(source: string): number {
     let n = 0;
     for (const rec of [...this.store.rows]) {
       if (rec.source === source && this.store.remove(rec.id)) n++;
@@ -220,35 +249,35 @@ class Memory extends EventEmitter {
     return n;
   }
 
-  prune(opts) {
+  prune(opts: { days?: number | null; maxChunks?: number | null }): number {
     const n = this.store.prune(opts);
     if (n) this.emit('indexed', this.store.stats());
     return n;
   }
 
-  compact() {
+  compact(): number {
     const n = this.store.compact();
     this.emit('indexed', this.store.stats());
     return n;
   }
 
-  stats() {
+  stats(): MemoryStatsWithEmbedder {
     return { ...this.store.stats(), embedder: this.embedder.state() };
   }
 
   /** Swaps backends at runtime; existing vectors are invalidated if needed. */
-  async setBackend({ backend, provider, apiKey }) {
+  async setBackend(cfg: BackendConfig): Promise<MemoryStatsWithEmbedder> {
     this.embedder.stop();
     this.embedder.removeAllListeners();
     this.embedder = new Embedder({
       cacheDir: path.join(this.dir, 'models'),
-      backend: backend || this.embedder.backend,
-      provider: provider || this.embedder.provider,
-      apiKey: apiKey ?? this.embedder.apiKey,
+      backend: cfg.backend ?? this.embedder.backend,
+      provider: cfg.provider ?? this.embedder.provider,
+      apiKey: cfg.apiKey ?? this.embedder.apiKey,
       allowDownload: this.settings.allowModelDownload !== false,
     });
     this.embedder.on('status', (s) => this.emit('status', s));
-    this._wired = false;
+    this.wired = false;
 
     const dim = this.embedder.expectedDim();
     if (dim !== this.store.dim) {
@@ -259,11 +288,9 @@ class Memory extends EventEmitter {
     return this.stats();
   }
 
-  stop() {
-    this._stopped = true;
+  stop(): void {
+    this.stopped = true;
     this.embedder.stop();
     this.store.close();
   }
 }
-
-module.exports = { Memory };

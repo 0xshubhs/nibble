@@ -1,6 +1,6 @@
-'use strict';
-const fs = require('fs');
-const path = require('path');
+import fs from 'fs';
+import path from 'path';
+import type { MemoryInput, MemoryRecord, MemoryStats, SearchOptions } from '../../types';
 
 /**
  * The memory store: append-only text + a parallel vector file, with hybrid
@@ -20,13 +20,15 @@ const path = require('path');
  */
 
 const STOPWORDS = new Set(
-  ('a an and are as at be but by for from has have i in is it its of on or that the to was were will with you your this ' +
-   'he she they them we us our my me do does did not no so if then than there here what when where who how all any can').split(' ')
+  (
+    'a an and are as at be but by for from has have i in is it its of on or that the to was were will with you your this ' +
+    'he she they them we us our my me do does did not no so if then than there here what when where who how all any can'
+  ).split(' ')
 );
 
 /** Cheap, dependency-free tokenizer: lowercase, split, drop stopwords and plurals. */
-function tokenize(text) {
-  const out = [];
+export function tokenize(text: string): string[] {
+  const out: string[] = [];
   for (const raw of String(text).toLowerCase().split(/[^a-z0-9_]+/)) {
     if (raw.length < 2 || raw.length > 40) continue;
     if (STOPWORDS.has(raw)) continue;
@@ -39,43 +41,82 @@ function tokenize(text) {
 const K1 = 1.2;
 const B = 0.75;
 
-// Below this cosine, MiniLM is telling us the texts are unrelated.
-const MIN_COSINE = 0.25;
+/**
+ * Below this cosine, MiniLM is telling us the texts are unrelated.
+ *
+ * Measured rather than guessed. Across question/document pairs for this
+ * model, genuinely related pairs scored 0.12 to 0.46 and unrelated ones
+ * -0.04 to 0.04, so the floor sits in the gap between the two. An earlier
+ * value of 0.25 was inside the related range and silently dropped real
+ * matches -- a paraphrased question would return nothing even though the
+ * answer was indexed.
+ */
+export const MIN_COSINE = 0.1;
 
-class MemoryStore {
+interface StoreMeta {
+  dim: number;
+  model: string | null;
+  version: number;
+}
+
+/** A line in chunks.jsonl is either a record or a deletion marker. */
+interface PersistedRecord extends Omit<MemoryRecord, 'row' | 'embedded'> {
+  tombstone?: false;
+}
+interface Tombstone {
+  id: string;
+  tombstone: true;
+}
+type LogLine = PersistedRecord | Tombstone;
+
+export interface Scored {
+  rec: MemoryRecord;
+  score: number;
+  keyword: number | null;
+  vector: number | null;
+}
+
+export class MemoryStore {
+  readonly dir: string;
+  readonly dim: number;
+  private readonly chunkFile: string;
+  private readonly vecFile: string;
+  private readonly metaFile: string;
+
+  rows: MemoryRecord[] = [];
+  byId = new Map<string, MemoryRecord>();
+  deleted = new Set<number>();
+  private vecs = new Float32Array(0);
+  private capacity = 0;
+
+  private inverted = new Map<string, Map<number, number>>();
+  private docLen: number[] = [];
+  private avgLen = 0;
+
+  meta: StoreMeta;
+  private vecFd: number | null = null;
+
   /**
-   * @param {string} dir  directory to keep the three files in
-   * @param {number} dim  embedding width; a change forces a re-embed
+   * @param dir directory to keep the three files in
+   * @param dim embedding width; a change forces a re-embed
    */
-  constructor(dir, dim = 384) {
+  constructor(dir: string, dim = 384) {
     this.dir = dir;
     this.dim = dim;
     this.chunkFile = path.join(dir, 'chunks.jsonl');
     this.vecFile = path.join(dir, 'vectors.bin');
     this.metaFile = path.join(dir, 'meta.json');
-
-    this.rows = [];          // chunk records, index === row number
-    this.byId = new Map();
-    this.deleted = new Set(); // row numbers
-    this.vecs = new Float32Array(0);
-    this.capacity = 0;
-
-    this.inverted = new Map(); // token -> Map(row -> termFrequency)
-    this.docLen = [];
-    this.avgLen = 0;
-
     this.meta = { dim, model: null, version: 1 };
-    this._vecFd = null;
   }
 
   /* ---------------- load ---------------- */
 
-  load() {
+  load(): this {
     fs.mkdirSync(this.dir, { recursive: true });
 
-    let stored = null;
+    let stored: Partial<StoreMeta> | null = null;
     try {
-      stored = JSON.parse(fs.readFileSync(this.metaFile, 'utf8'));
+      stored = JSON.parse(fs.readFileSync(this.metaFile, 'utf8')) as Partial<StoreMeta>;
     } catch {
       stored = null; // first run, or a meta file we cannot read
     }
@@ -87,50 +128,76 @@ class MemoryStore {
       // vectors are of unknown provenance. Both make the existing vectors
       // unreadable, so drop them -- the captured text survives and gets
       // re-embedded in the background.
-      this._resetVectors();
-      this.meta = { ...this.meta, ...(stored || {}), dim: this.dim, model: null };
+      this.resetVectors();
+      this.meta = { ...this.meta, ...(stored ?? {}), dim: this.dim, model: null };
       this.saveMeta();
     }
 
-    this._loadChunks();
-    this._loadVectors();
-    this._markEmbedded();
-    this._rebuildIndex();
+    this.loadChunks();
+    this.ensureVectorFile();
+    this.loadVectors();
+    this.markEmbedded();
+    this.rebuildIndex();
     return this;
   }
 
-  _loadChunks() {
+  private loadChunks(): void {
     let raw = '';
     try {
       raw = fs.readFileSync(this.chunkFile, 'utf8');
     } catch {
       return;
     }
-    const lines = raw.split('\n');
-    for (const line of lines) {
+    for (const line of raw.split('\n')) {
       if (!line) continue;
-      let rec;
+      let parsed: LogLine;
       try {
-        rec = JSON.parse(line);
+        parsed = JSON.parse(line) as LogLine;
       } catch {
         continue; // a torn final line from a hard kill -- skip it
       }
-      if (rec.tombstone) {
+
+      if ('tombstone' in parsed && parsed.tombstone) {
         // A deletion marker refers to an earlier line; it is not a row of its
         // own. Replaying it as one would shift every subsequent row away from
         // its vector.
-        const target = this.byId.get(rec.id);
+        const target = this.byId.get(parsed.id);
         if (target) this.deleted.add(target.row);
         continue;
       }
+
+      const rec = parsed as MemoryRecord;
       rec.row = this.rows.length;
       this.rows.push(rec);
       this.byId.set(rec.id, rec);
     }
   }
 
-  _loadVectors() {
-    let buf;
+  /**
+   * Makes vectors.bin exactly as long as the chunk log.
+   *
+   * Without this, a model change deletes the file and the next setVector()
+   * fails with ENOENT -- there is no append to recreate it unless something
+   * new is captured first. It also repairs a file truncated by a hard kill,
+   * and drops orphan rows left by an interrupted compaction.
+   */
+  private ensureVectorFile(): void {
+    const needed = this.rows.length * this.dim * 4;
+    let size = -1;
+    try {
+      size = fs.statSync(this.vecFile).size;
+    } catch {
+      size = -1;
+    }
+    if (size === needed) return;
+
+    if (size < 0) fs.writeFileSync(this.vecFile, Buffer.alloc(needed));
+    else if (size < needed) fs.appendFileSync(this.vecFile, Buffer.alloc(needed - size));
+    else fs.truncateSync(this.vecFile, needed);
+  }
+
+  private loadVectors(): void {
+    let buf: Buffer;
     try {
       buf = fs.readFileSync(this.vecFile);
     } catch {
@@ -150,54 +217,59 @@ class MemoryStore {
    * length and so can never be. Deriving the flag this way means the log and
    * the vector file can never drift apart, whenever the app was killed.
    */
-  _markEmbedded() {
+  private markEmbedded(): void {
     const dim = this.dim;
     for (const rec of this.rows) {
       const base = rec.row * dim;
       let filled = false;
       for (let i = 0; i < dim; i++) {
-        if (this.vecs[base + i] !== 0) { filled = true; break; }
+        if (this.vecs[base + i] !== 0) {
+          filled = true;
+          break;
+        }
       }
       rec.embedded = filled;
     }
   }
 
-  _resetVectors() {
+  private resetVectors(): void {
     try {
       fs.rmSync(this.vecFile, { force: true });
-    } catch { /* nothing to remove */ }
+    } catch {
+      /* nothing to remove */
+    }
     for (const r of this.rows) r.embedded = false;
   }
 
   /* ---------------- keyword index ---------------- */
 
-  _rebuildIndex() {
+  private rebuildIndex(): void {
     this.inverted = new Map();
-    this.docLen = new Array(this.rows.length).fill(0);
+    this.docLen = new Array<number>(this.rows.length).fill(0);
     let total = 0;
 
     for (const rec of this.rows) {
       if (this.deleted.has(rec.row)) continue;
-      const toks = tokenize(rec.text + ' ' + (rec.title || ''));
+      const toks = tokenize(`${rec.text} ${rec.title ?? ''}`);
       this.docLen[rec.row] = toks.length;
       total += toks.length;
       for (const t of toks) {
         let posting = this.inverted.get(t);
         if (!posting) this.inverted.set(t, (posting = new Map()));
-        posting.set(rec.row, (posting.get(rec.row) || 0) + 1);
+        posting.set(rec.row, (posting.get(rec.row) ?? 0) + 1);
       }
     }
     const live = this.rows.length - this.deleted.size;
     this.avgLen = live > 0 ? total / live : 0;
   }
 
-  _indexRow(rec) {
-    const toks = tokenize(rec.text + ' ' + (rec.title || ''));
+  private indexRow(rec: MemoryRecord): void {
+    const toks = tokenize(`${rec.text} ${rec.title ?? ''}`);
     this.docLen[rec.row] = toks.length;
     for (const t of toks) {
       let posting = this.inverted.get(t);
       if (!posting) this.inverted.set(t, (posting = new Map()));
-      posting.set(rec.row, (posting.get(rec.row) || 0) + 1);
+      posting.set(rec.row, (posting.get(rec.row) ?? 0) + 1);
     }
     const live = this.rows.length - this.deleted.size;
     this.avgLen = live > 0 ? (this.avgLen * (live - 1) + toks.length) / live : 0;
@@ -205,7 +277,7 @@ class MemoryStore {
 
   /* ---------------- writes ---------------- */
 
-  _grow(needRows) {
+  private grow(needRows: number): void {
     if (needRows <= this.capacity) return;
     const next = Math.max(needRows, Math.ceil(this.capacity * 1.6) || 256);
     const bigger = new Float32Array(next * this.dim);
@@ -217,63 +289,62 @@ class MemoryStore {
   /**
    * Appends chunks. Vectors are reserved as zeroed rows and filled in later
    * by setVector(), so capture never blocks on the model.
-   * @returns {Array<object>} the stored records, each carrying its row number
    */
-  add(records) {
+  add(records: MemoryInput[]): MemoryRecord[] {
     if (!records.length) return [];
-    const lines = [];
+    const lines: string[] = [];
     const zeros = Buffer.alloc(this.dim * 4);
-    const vecChunks = [];
-    const stored = [];
+    const vecChunks: Buffer[] = [];
+    const stored: MemoryRecord[] = [];
 
-    this._grow(this.rows.length + records.length);
+    this.grow(this.rows.length + records.length);
 
     for (const r of records) {
-      const rec = {
+      const rec: MemoryRecord = {
         id: r.id,
         source: r.source,
-        kind: r.kind || 'text',
-        title: r.title || '',
+        kind: r.kind ?? 'text',
+        title: r.title ?? '',
         text: r.text,
-        ts: r.ts || Date.now(),
-        meta: r.meta || {},
+        ts: r.ts ?? Date.now(),
+        meta: r.meta ?? {},
+        row: this.rows.length,
         embedded: false,
       };
-      rec.row = this.rows.length;
       this.rows.push(rec);
       this.byId.set(rec.id, rec);
       // `row` and `embedded` are derived at load time, so they never go in
       // the log -- writing them would let the file disagree with the vectors.
-      const { row, embedded, ...persisted } = rec;
+      const { row: _row, embedded: _embedded, ...persisted } = rec;
       lines.push(JSON.stringify(persisted));
       vecChunks.push(zeros);
-      this._indexRow(rec);
+      this.indexRow(rec);
       stored.push(rec);
     }
 
-    fs.appendFileSync(this.chunkFile, lines.join('\n') + '\n');
+    fs.appendFileSync(this.chunkFile, `${lines.join('\n')}\n`);
     fs.appendFileSync(this.vecFile, Buffer.concat(vecChunks));
     return stored;
   }
 
   /** Fills in a reserved vector slot, in memory and on disk. */
-  setVector(row, vec) {
+  setVector(row: number, vec: Float32Array): boolean {
     if (row < 0 || row >= this.rows.length) return false;
     if (vec.length !== this.dim) return false;
 
     this.vecs.set(vec, row * this.dim);
 
-    if (this._vecFd === null) this._vecFd = fs.openSync(this.vecFile, 'r+');
+    if (this.vecFd === null) this.vecFd = fs.openSync(this.vecFile, 'r+');
     const buf = Buffer.from(vec.buffer, vec.byteOffset, this.dim * 4);
-    fs.writeSync(this._vecFd, buf, 0, buf.length, row * this.dim * 4);
+    fs.writeSync(this.vecFd, buf, 0, buf.length, row * this.dim * 4);
 
     this.rows[row].embedded = true;
     return true;
   }
 
   /** Rows still waiting on the embedder, oldest first. */
-  pending(limit = 64) {
-    const out = [];
+  pending(limit = 64): MemoryRecord[] {
+    const out: MemoryRecord[] = [];
     for (const rec of this.rows) {
       if (rec.embedded || this.deleted.has(rec.row)) continue;
       out.push(rec);
@@ -282,24 +353,24 @@ class MemoryStore {
     return out;
   }
 
-  remove(id) {
+  remove(id: string): boolean {
     const rec = this.byId.get(id);
     if (!rec || this.deleted.has(rec.row)) return false;
     this.deleted.add(rec.row);
     // Tombstone in the log; compact() reclaims the space later.
-    fs.appendFileSync(this.chunkFile, JSON.stringify({ id: rec.id, tombstone: true }) + '\n');
+    fs.appendFileSync(this.chunkFile, `${JSON.stringify({ id: rec.id, tombstone: true })}\n`);
     for (const posting of this.inverted.values()) posting.delete(rec.row);
     return true;
   }
 
   /* ---------------- search ---------------- */
 
-  /** BM25 over the inverted index. @returns {Array<[row, score]>} */
-  keywordSearch(query, k) {
+  /** BM25 over the inverted index. */
+  keywordSearch(query: string, k: number): Array<[number, number]> {
     const toks = tokenize(query);
     if (!toks.length) return [];
     const live = this.rows.length - this.deleted.size;
-    const scores = new Map();
+    const scores = new Map<number, number>();
 
     for (const t of toks) {
       const posting = this.inverted.get(t);
@@ -307,8 +378,9 @@ class MemoryStore {
       const idf = Math.log(1 + (live - posting.size + 0.5) / (posting.size + 0.5));
       for (const [row, tf] of posting) {
         if (this.deleted.has(row)) continue;
-        const norm = tf * (K1 + 1) / (tf + K1 * (1 - B + B * (this.docLen[row] / (this.avgLen || 1))));
-        scores.set(row, (scores.get(row) || 0) + idf * norm);
+        const norm =
+          (tf * (K1 + 1)) / (tf + K1 * (1 - B + B * (this.docLen[row] / (this.avgLen || 1))));
+        scores.set(row, (scores.get(row) ?? 0) + idf * norm);
       }
     }
     return [...scores.entries()].sort((a, b) => b[1] - a[1]).slice(0, k);
@@ -322,9 +394,9 @@ class MemoryStore {
    * engine that cannot say "no results" -- with MiniLM, a cosine under ~0.25
    * means the two texts are simply unrelated.
    */
-  vectorSearch(queryVec, k, floor = MIN_COSINE) {
+  vectorSearch(queryVec: Float32Array | null, k: number, floor = MIN_COSINE): Array<[number, number]> {
     if (!queryVec || queryVec.length !== this.dim) return [];
-    const out = [];
+    const out: Array<[number, number]> = [];
     const dim = this.dim;
 
     for (const rec of this.rows) {
@@ -346,15 +418,16 @@ class MemoryStore {
    * cosine's [-1,1] never have to be put on a common scale -- and a result
    * that both methods like outranks one that only a single method loves.
    */
-  search(queryText, queryVec, { k = 8, pool = 60, since = null, source = null } = {}) {
+  search(queryText: string, queryVec: Float32Array | null, opts: SearchOptions = {}): Scored[] {
+    const { k = 8, pool = 60, since = null, source = null } = opts;
     const kw = this.keywordSearch(queryText, pool);
     const vec = queryVec ? this.vectorSearch(queryVec, pool) : [];
 
     const RRF_K = 60;
-    const fused = new Map();
-    const bump = (list, weight) => {
+    const fused = new Map<number, number>();
+    const bump = (list: Array<[number, number]>, weight: number): void => {
       list.forEach(([row], rank) => {
-        fused.set(row, (fused.get(row) || 0) + weight / (RRF_K + rank + 1));
+        fused.set(row, (fused.get(row) ?? 0) + weight / (RRF_K + rank + 1));
       });
     };
     bump(kw, 1.0);
@@ -365,7 +438,12 @@ class MemoryStore {
 
     return [...fused.entries()]
       .sort((a, b) => b[1] - a[1])
-      .map(([row, score]) => ({ rec: this.rows[row], score, keyword: kwScore.get(row) ?? null, vector: vecScore.get(row) ?? null }))
+      .map(([row, score]) => ({
+        rec: this.rows[row],
+        score,
+        keyword: kwScore.get(row) ?? null,
+        vector: vecScore.get(row) ?? null,
+      }))
       .filter(({ rec }) => {
         if (!rec || this.deleted.has(rec.row)) return false;
         if (since && rec.ts < since) return false;
@@ -375,8 +453,8 @@ class MemoryStore {
       .slice(0, k);
   }
 
-  recent(limit = 20, source = null) {
-    const out = [];
+  recent(limit = 20, source: string | null = null): MemoryRecord[] {
+    const out: MemoryRecord[] = [];
     for (let i = this.rows.length - 1; i >= 0 && out.length < limit; i--) {
       const rec = this.rows[i];
       if (this.deleted.has(rec.row)) continue;
@@ -389,7 +467,7 @@ class MemoryStore {
   /* ---------------- maintenance ---------------- */
 
   /** Drops anything older than `days`, keeping at most `maxChunks` rows. */
-  prune({ days = null, maxChunks = null } = {}) {
+  prune({ days = null, maxChunks = null }: { days?: number | null; maxChunks?: number | null } = {}): number {
     let removed = 0;
     if (days) {
       const cutoff = Date.now() - days * 86400000;
@@ -411,32 +489,33 @@ class MemoryStore {
   }
 
   /** Rewrites both files without the tombstoned rows, then reloads. */
-  compact() {
+  compact(): number {
     const keep = this.rows.filter((r) => !this.deleted.has(r.row));
-    const tmpChunks = this.chunkFile + '.tmp';
-    const tmpVecs = this.vecFile + '.tmp';
+    const tmpChunks = `${this.chunkFile}.tmp`;
+    const tmpVecs = `${this.vecFile}.tmp`;
 
     const vecOut = Buffer.alloc(keep.length * this.dim * 4);
     const lines = keep.map((rec, i) => {
       const src = new Float32Array(this.vecs.buffer, rec.row * this.dim * 4, this.dim);
       Buffer.from(src.buffer, src.byteOffset, this.dim * 4).copy(vecOut, i * this.dim * 4);
-      const { row, ...rest } = rec;
+      const { row: _row, embedded: _embedded, ...rest } = rec;
       return JSON.stringify(rest);
     });
 
-    fs.writeFileSync(tmpChunks, lines.length ? lines.join('\n') + '\n' : '');
+    fs.writeFileSync(tmpChunks, lines.length ? `${lines.join('\n')}\n` : '');
     fs.writeFileSync(tmpVecs, vecOut);
-    this._closeFd();
+    this.closeFd();
     fs.renameSync(tmpChunks, this.chunkFile);
     fs.renameSync(tmpVecs, this.vecFile);
 
     this.rows = [];
     this.byId = new Map();
     this.deleted = new Set();
-    this._loadChunks();
-    this._loadVectors();
-    this._markEmbedded();
-    this._rebuildIndex();
+    this.loadChunks();
+    this.ensureVectorFile();
+    this.loadVectors();
+    this.markEmbedded();
+    this.rebuildIndex();
     return keep.length;
   }
 
@@ -444,28 +523,29 @@ class MemoryStore {
    * Vectors from different models are not comparable even at the same width,
    * so switching backends has to invalidate them. The text is untouched and
    * the embedder refills the slots in the background.
-   * @returns {boolean} true if a re-embed was triggered
+   *
+   * @returns true if a re-embed was triggered
    */
-  ensureModel(modelId) {
+  ensureModel(modelId: string | null): boolean {
     if (!modelId || this.meta.model === modelId) return false;
     const hadVectors = this.rows.some((r) => r.embedded);
-    this._resetVectors();
+    this.resetVectors();
     this.vecs = new Float32Array(this.capacity * this.dim);
     fs.writeFileSync(this.vecFile, Buffer.alloc(this.rows.length * this.dim * 4));
-    this._closeFd();
+    this.closeFd();
     for (const rec of this.rows) rec.embedded = false;
     this.saveMeta({ model: modelId });
     return hadVectors;
   }
 
-  saveMeta(patch = {}) {
+  saveMeta(patch: Partial<StoreMeta> = {}): void {
     this.meta = { ...this.meta, ...patch, dim: this.dim };
-    const tmp = this.metaFile + '.tmp';
+    const tmp = `${this.metaFile}.tmp`;
     fs.writeFileSync(tmp, JSON.stringify(this.meta, null, 2));
     fs.renameSync(tmp, this.metaFile);
   }
 
-  stats() {
+  stats(): MemoryStats {
     const live = this.rows.length - this.deleted.size;
     let embedded = 0;
     let bytes = 0;
@@ -486,16 +566,18 @@ class MemoryStore {
     };
   }
 
-  _closeFd() {
-    if (this._vecFd !== null) {
-      try { fs.closeSync(this._vecFd); } catch { /* already gone */ }
-      this._vecFd = null;
+  private closeFd(): void {
+    if (this.vecFd !== null) {
+      try {
+        fs.closeSync(this.vecFd);
+      } catch {
+        /* already gone */
+      }
+      this.vecFd = null;
     }
   }
 
-  close() {
-    this._closeFd();
+  close(): void {
+    this.closeFd();
   }
 }
-
-module.exports = { MemoryStore, tokenize, MIN_COSINE };

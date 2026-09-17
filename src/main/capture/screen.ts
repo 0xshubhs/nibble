@@ -1,5 +1,5 @@
-'use strict';
-const { systemPreferences } = require('electron');
+import { shell, systemPreferences } from 'electron';
+import type { CaptureSource, PermissionResult, SourceInstance } from '../../types';
 
 /**
  * Periodic screen capture -> OCR -> text. Phase 3.
@@ -27,7 +27,7 @@ const { systemPreferences } = require('electron');
  *                more there, not less.
  */
 
-module.exports = {
+const source: CaptureSource = {
   id: 'screen',
   label: 'Screen',
   description: 'Reads text off your screen on a timer. Not capturing yet — this is the last phase.',
@@ -44,16 +44,16 @@ module.exports = {
         note: 'No OS permission gate here — the on-screen indicator is the only thing telling you it is running.',
       };
     }
-    let status = 'unknown';
+    let permission = 'unknown';
     try {
-      status = systemPreferences.getMediaAccessStatus('screen');
+      permission = systemPreferences.getMediaAccessStatus('screen');
     } catch {
-      status = 'unknown';
+      permission = 'unknown';
     }
     return {
       ok: false,
       reason: 'Not wired up yet',
-      permission: status,
+      permission,
       note: 'macOS requires Screen Recording in System Settings, and the app has to be relaunched after granting it.',
     };
   },
@@ -62,24 +62,27 @@ module.exports = {
    * macOS has no in-app prompt for screen recording; the honest move is to
    * send the user straight to the right settings pane.
    */
-  async requestPermission() {
+  async requestPermission(): Promise<PermissionResult> {
     if (process.platform !== 'darwin') return { granted: true, status: 'not-required' };
-    const { shell } = require('electron');
     await shell.openExternal(
       'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
     );
     return { granted: false, status: 'opened-settings', needsRelaunch: true };
   },
 
-  create() {
+  create(): SourceInstance {
     return {
       start() {
         throw new Error('Screen capture is not implemented yet');
       },
-      stop() {},
+      stop() {
+        /* nothing running */
+      },
       state() {
         return { running: false, captured: 0 };
       },
     };
   },
 };
+
+export default source;

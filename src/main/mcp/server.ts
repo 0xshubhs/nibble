@@ -1,11 +1,12 @@
-'use strict';
-const http = require('http');
-const crypto = require('crypto');
-const { z } = require('zod');
-const { McpServer } = require('@modelcontextprotocol/sdk/server/mcp.js');
-const { StreamableHTTPServerTransport } = require('@modelcontextprotocol/sdk/server/streamableHttp.js');
+import http from 'http';
+import crypto from 'crypto';
+import { z } from 'zod';
+import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
-const { nextAfter, REPEATS } = require('../scheduler');
+import { nextAfter, isRepeat } from '../scheduler';
+import type { Memory } from '../memory';
+import type { McpInfo, Reminder, ReminderInput, Settings } from '../../types';
 
 /**
  * Exposes the memory to any MCP client, over HTTP on loopback.
@@ -23,78 +24,122 @@ const { nextAfter, REPEATS } = require('../scheduler');
  * long-lived session to leak, and a client that dies mid-call leaves nothing.
  */
 
-const DEFAULT_PORT = 8787;
+export const DEFAULT_PORT = 8787;
 
-function newToken() {
+function newToken(): string {
   return crypto.randomBytes(24).toString('base64url');
 }
 
 /** Constant-time compare so a wrong token cannot be guessed by timing. */
-function tokenMatches(a, b) {
+function tokenMatches(a: string, b: string): boolean {
   const ba = Buffer.from(String(a));
   const bb = Buffer.from(String(b));
   if (ba.length !== bb.length) return false;
   return crypto.timingSafeEqual(ba, bb);
 }
 
-function excerpt(text, limit = 600) {
-  const t = text.trim();
-  return t.length <= limit ? t : t.slice(0, limit) + '…';
+interface TextResult {
+  content: Array<{ type: 'text'; text: string }>;
 }
 
-class McpBridge {
-  /**
-   * @param {object} deps
-   * @param {import('../memory').Memory} deps.memory
-   * @param {object} deps.reminders  { list, add }
-   * @param {() => object} deps.settings
-   */
-  constructor({ memory, reminders, settings }) {
+/**
+ * The SDK's registerTool generics are deep enough to blow tsc's instantiation
+ * limit (TS2589) once six tools are declared in one file. This wrapper keeps
+ * the handler's argument types inferred from the zod shape -- which is the
+ * part worth having -- while the call into the SDK itself is untyped.
+ */
+function tool<S extends z.ZodRawShape>(
+  mcp: McpServer,
+  name: string,
+  config: { title: string; description: string; inputSchema: S },
+  handler: (args: z.objectOutputType<S, z.ZodTypeAny>) => Promise<TextResult>
+): void {
+  (mcp.registerTool as unknown as (n: string, c: unknown, h: unknown) => void)(
+    name,
+    config,
+    handler
+  );
+}
+
+function excerpt(text: string, limit = 600): string {
+  const t = text.trim();
+  return t.length <= limit ? t : `${t.slice(0, limit)}…`;
+}
+
+/** The reminder operations the tools need, supplied by the main process. */
+export interface ReminderBridge {
+  list(): Reminder[];
+  add(input: ReminderInput): Reminder;
+}
+
+export interface McpDeps {
+  memory: Memory;
+  reminders: ReminderBridge;
+  settings: () => Settings;
+}
+
+interface ToolCall {
+  ts: number;
+  name: string;
+  args: unknown;
+}
+
+export class McpBridge {
+  private readonly memory: Memory;
+  private readonly reminders: ReminderBridge;
+  private readonly settings: () => Settings;
+
+  private server: http.Server | null = null;
+  port: number | null = null;
+  token: string | null = null;
+  lastError: string | null = null;
+  calls: ToolCall[] = [];
+
+  constructor({ memory, reminders, settings }: McpDeps) {
     this.memory = memory;
     this.reminders = reminders;
     this.settings = settings;
-    this.server = null;
-    this.port = null;
-    this.token = null;
-    this.lastError = null;
-    this.calls = [];
   }
 
   /* ---------------- tools ---------------- */
 
-  _build() {
+  private build(): McpServer {
     const mcp = new McpServer(
       { name: 'nibble-memory', version: '0.1.0' },
       { capabilities: { tools: {} } }
     );
 
-    const note = (name, args) => {
+    const note = (name: string, args: unknown): void => {
       this.calls.unshift({ ts: Date.now(), name, args });
       this.calls.length = Math.min(this.calls.length, 50);
     };
 
-    const text = (s) => ({ content: [{ type: 'text', text: s }] });
+    const text = (s: string): TextResult => ({ content: [{ type: 'text', text: s }] });
 
-    mcp.registerTool(
+    tool(
+      mcp,
       'search_memory',
       {
         title: 'Search memory',
         description:
-          'Search the user\'s captured memory: things they copied, notes they keep, files they wrote. ' +
+          "Search the user's captured memory: things they copied, notes they keep, files they wrote. " +
           'Combines keyword and semantic matching, so paraphrasing the question works. ' +
           'Use this before asking the user to re-explain context they may have already recorded.',
         inputSchema: {
           query: z.string().describe('What to look for, in natural language'),
           limit: z.number().int().min(1).max(25).optional().describe('How many results (default 8)'),
-          source: z.string().optional().describe('Restrict to one capture source, e.g. clipboard or files'),
+          source: z
+            .string()
+            .optional()
+            .describe('Restrict to one capture source, e.g. clipboard or files'),
           since_days: z.number().int().min(1).optional().describe('Only consider the last N days'),
         },
       },
       async ({ query, limit, source, since_days }) => {
         note('search_memory', { query, limit, source, since_days });
         const hits = await this.memory.search(query, {
-          k: limit || 8,
-          source: source || null,
+          k: limit ?? 8,
+          source: source ?? null,
           since: since_days ? Date.now() - since_days * 86400000 : null,
         });
         if (!hits.length) return text(`No memory matches "${query}".`);
@@ -111,11 +156,13 @@ class McpBridge {
       }
     );
 
-    mcp.registerTool(
+    tool(
+      mcp,
       'recent_memory',
       {
         title: 'Recent memory',
-        description: 'The most recently captured items, newest first. Use for "what was I just doing" questions.',
+        description:
+          'The most recently captured items, newest first. Use for "what was I just doing" questions.',
         inputSchema: {
           limit: z.number().int().min(1).max(50).optional(),
           source: z.string().optional(),
@@ -123,25 +170,26 @@ class McpBridge {
       },
       async ({ limit, source }) => {
         note('recent_memory', { limit, source });
-        const items = this.memory.recent(limit || 15, source || null);
+        const items = this.memory.recent(limit ?? 15, source ?? null);
         if (!items.length) return text('Nothing captured yet.');
         return text(
           items
             .map((r) => {
               const when = new Date(r.ts).toISOString().slice(0, 16).replace('T', ' ');
-              return `${when} · ${r.source}${r.title ? ' · ' + r.title : ''}\n${excerpt(r.text, 300)}`;
+              return `${when} · ${r.source}${r.title ? ` · ${r.title}` : ''}\n${excerpt(r.text, 300)}`;
             })
             .join('\n\n')
         );
       }
     );
 
-    mcp.registerTool(
+    tool(
+      mcp,
       'remember',
       {
         title: 'Remember this',
         description:
-          'Save something to the user\'s memory so it can be recalled in a later conversation. ' +
+          "Save something to the user's memory so it can be recalled in a later conversation. " +
           'Use when the user says to remember something, or states a durable fact about themselves.',
         inputSchema: {
           text: z.string().describe('The content to store'),
@@ -150,13 +198,19 @@ class McpBridge {
       },
       async ({ text: body, title }) => {
         note('remember', { title });
-        const res = this.memory.capture({ source: 'assistant', kind: 'note', text: body, title: title || '' });
+        const res = this.memory.capture({
+          source: 'assistant',
+          kind: 'note',
+          text: body,
+          title: title ?? '',
+        });
         if (!res.added) return text(`Not stored (${res.skipped}).`);
         return text(`Stored ${res.added} chunk${res.added === 1 ? '' : 's'}.`);
       }
     );
 
-    mcp.registerTool(
+    tool(
+      mcp,
       'memory_stats',
       {
         title: 'Memory stats',
@@ -174,11 +228,12 @@ class McpBridge {
       }
     );
 
-    mcp.registerTool(
+    tool(
+      mcp,
       'list_reminders',
       {
         title: 'List reminders',
-        description: 'The user\'s scheduled reminders, soonest first.',
+        description: "The user's scheduled reminders, soonest first.",
         inputSchema: {},
       },
       async () => {
@@ -188,16 +243,17 @@ class McpBridge {
         return text(
           list
             .map((r) => {
-              const when = new Date(r.snoozedUntil || r.at).toLocaleString();
+              const when = new Date(r.snoozedUntil ?? r.at).toLocaleString();
               const rep = r.repeat === 'none' ? 'once' : r.repeat;
-              return `${r.enabled ? '•' : '◦'} ${r.title} — ${when} (${rep})${r.body ? '\n   ' + r.body : ''}`;
+              return `${r.enabled ? '•' : '◦'} ${r.title} — ${when} (${rep})${r.body ? `\n   ${r.body}` : ''}`;
             })
             .join('\n')
         );
       }
     );
 
-    mcp.registerTool(
+    tool(
+      mcp,
       'add_reminder',
       {
         title: 'Add a reminder',
@@ -220,7 +276,7 @@ class McpBridge {
         const ts = Date.parse(at);
         if (Number.isNaN(ts)) return text(`Could not read "${at}" as a date. Use ISO 8601.`);
 
-        const rep = REPEATS.has(repeat) ? repeat : 'none';
+        const rep = isRepeat(repeat) ? repeat : 'none';
         let when = ts;
         if (when <= Date.now()) {
           const next = nextAfter(when, Date.now(), rep, interval_minutes);
@@ -229,10 +285,10 @@ class McpBridge {
         }
         const r = this.reminders.add({
           title,
-          body: body || '',
+          body: body ?? '',
           at: when,
           repeat: rep,
-          intervalMinutes: interval_minutes || 60,
+          intervalMinutes: interval_minutes ?? 60,
         });
         return text(`Reminder "${r.title}" set for ${new Date(r.at).toLocaleString()}.`);
       }
@@ -243,16 +299,16 @@ class McpBridge {
 
   /* ---------------- http ---------------- */
 
-  _authorized(req) {
+  private authorized(req: http.IncomingMessage): boolean {
     // Loopback only is enforced at bind time; this guards against local
     // processes and browser pages that can also reach 127.0.0.1.
-    const auth = req.headers.authorization || '';
+    const auth = req.headers.authorization ?? '';
     const bearer = auth.startsWith('Bearer ') ? auth.slice(7) : '';
-    const header = req.headers['x-api-key'] || '';
-    return tokenMatches(bearer || header, this.token);
+    const header = (req.headers['x-api-key'] as string | undefined) ?? '';
+    return tokenMatches(bearer || header, this.token ?? '');
   }
 
-  _originOk(req) {
+  private originOk(req: http.IncomingMessage): boolean {
     const origin = req.headers.origin;
     if (!origin) return true; // a non-browser client sends none
     try {
@@ -263,8 +319,8 @@ class McpBridge {
     }
   }
 
-  async _handle(req, res) {
-    if (!this._originOk(req)) {
+  private async handle(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    if (!this.originOk(req)) {
       res.writeHead(403).end('forbidden origin');
       return;
     }
@@ -273,19 +329,19 @@ class McpBridge {
       res.end(JSON.stringify({ ok: true, name: 'nibble-memory' }));
       return;
     }
-    if (!this._authorized(req)) {
+    if (!this.authorized(req)) {
       res.writeHead(401, { 'www-authenticate': 'Bearer' }).end('unauthorized');
       return;
     }
-    if (!req.url.startsWith('/mcp')) {
+    if (!req.url?.startsWith('/mcp')) {
       res.writeHead(404).end('not found');
       return;
     }
 
-    let body;
+    let body: unknown;
     if (req.method === 'POST') {
-      const chunks = [];
-      for await (const c of req) chunks.push(c);
+      const chunks: Buffer[] = [];
+      for await (const c of req) chunks.push(c as Buffer);
       try {
         body = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
       } catch {
@@ -295,38 +351,38 @@ class McpBridge {
     }
 
     // Stateless: a server and transport per request, torn down with it.
-    const mcp = this._build();
+    const mcp = this.build();
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on('close', () => {
-      transport.close().catch(() => {});
-      mcp.close().catch(() => {});
+      void transport.close().catch(() => undefined);
+      void mcp.close().catch(() => undefined);
     });
 
     try {
       await mcp.connect(transport);
       await transport.handleRequest(req, res, body);
     } catch (err) {
-      this.lastError = err.message;
+      this.lastError = err instanceof Error ? err.message : String(err);
       if (!res.headersSent) res.writeHead(500).end('mcp error');
     }
   }
 
-  start({ port } = {}) {
-    if (this.server) return this.info();
+  start({ port }: { port?: number } = {}): Promise<McpInfo> {
+    if (this.server) return Promise.resolve(this.info());
 
     const settings = this.settings();
     this.token = settings.mcpToken || newToken();
-    const wanted = port || settings.mcpPort || DEFAULT_PORT;
+    const wanted = port ?? settings.mcpPort ?? DEFAULT_PORT;
 
-    return new Promise((resolve) => {
+    return new Promise<McpInfo>((resolve) => {
       const server = http.createServer((req, res) => {
-        this._handle(req, res).catch((err) => {
-          this.lastError = err.message;
+        this.handle(req, res).catch((err: unknown) => {
+          this.lastError = err instanceof Error ? err.message : String(err);
           if (!res.headersSent) res.writeHead(500).end('error');
         });
       });
 
-      server.on('error', (err) => {
+      server.on('error', (err: NodeJS.ErrnoException) => {
         // A busy port is the common case; fall back to an ephemeral one
         // rather than leaving the connector dead.
         if (err.code === 'EADDRINUSE' && this.port === null) {
@@ -340,36 +396,34 @@ class McpBridge {
 
       server.listen(wanted, '127.0.0.1', () => {
         this.server = server;
-        this.port = server.address().port;
+        const addr = server.address();
+        this.port = typeof addr === 'object' && addr ? addr.port : null;
         this.lastError = null;
         resolve(this.info());
       });
     });
   }
 
-  stop() {
+  stop(): void {
     if (!this.server) return;
     this.server.close();
     this.server = null;
     this.port = null;
   }
 
-  regenerateToken() {
+  regenerateToken(): McpInfo {
     this.token = newToken();
     return this.info();
   }
 
-  info() {
-    const url = this.port ? `http://127.0.0.1:${this.port}/mcp` : null;
+  info(): McpInfo {
     return {
       running: Boolean(this.server),
       port: this.port,
       token: this.token,
-      url,
+      url: this.port ? `http://127.0.0.1:${this.port}/mcp` : null,
       error: this.lastError,
       calls: this.calls.slice(0, 10),
     };
   }
 }
-
-module.exports = { McpBridge, DEFAULT_PORT };

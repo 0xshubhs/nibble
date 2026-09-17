@@ -1,10 +1,10 @@
-'use strict';
-const fs = require('fs');
-const path = require('path');
-const { EventEmitter } = require('events');
-const { dataPath } = require('./paths');
+import fs from 'fs';
+import path from 'path';
+import { EventEmitter } from 'events';
+import { dataPath } from './paths';
+import type { Reminder, Settings, StoreData } from '../types';
 
-const DEFAULTS = {
+export const DEFAULTS: StoreData = {
   reminders: [],
   settings: {
     launchAtLogin: false,
@@ -18,11 +18,11 @@ const DEFAULTS = {
     memoryFolders: [],
     capturePaused: false,
     allowModelDownload: true,
-    embedBackend: 'local',       // 'local' | 'cloud'
-    embedProvider: 'gemini',     // when cloud
+    embedBackend: 'local',
+    embedProvider: 'gemini',
     embedApiKey: '',
-    retentionDays: 0,            // 0 = keep forever
-    maxChunks: 0,                // 0 = no cap
+    retentionDays: 0,
+    maxChunks: 0,
 
     // --- mcp connector ---
     mcpEnabled: false,
@@ -31,57 +31,64 @@ const DEFAULTS = {
   },
 };
 
+interface StoreEvents {
+  changed: [StoreData];
+}
+
 /**
  * A tiny JSON store. Writes go through a temp file + rename so a crash
  * mid-write cannot leave a truncated config behind.
  */
-class Store extends EventEmitter {
+export class Store extends EventEmitter<StoreEvents> {
+  readonly file: string;
+  data: StoreData;
+
   constructor() {
     super();
     this.file = path.join(dataPath().dir, 'store.json');
-    this.data = this._read();
+    this.data = this.read();
   }
 
-  _read() {
+  private read(): StoreData {
     try {
-      const raw = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+      const raw = JSON.parse(fs.readFileSync(this.file, 'utf8')) as Partial<StoreData>;
       return {
         reminders: Array.isArray(raw.reminders) ? raw.reminders : [],
-        settings: { ...DEFAULTS.settings, ...(raw.settings || {}) },
+        settings: { ...DEFAULTS.settings, ...(raw.settings ?? {}) },
       };
     } catch {
       return structuredClone(DEFAULTS);
     }
   }
 
-  _write() {
+  private write(): void {
     const tmp = `${this.file}.${process.pid}.tmp`;
     fs.mkdirSync(path.dirname(this.file), { recursive: true });
     fs.writeFileSync(tmp, JSON.stringify(this.data, null, 2));
     fs.renameSync(tmp, this.file);
   }
 
-  save() {
-    this._write();
+  save(): void {
+    this.write();
     this.emit('changed', this.data);
   }
 
-  get reminders() {
+  get reminders(): Reminder[] {
     return this.data.reminders;
   }
 
-  get settings() {
+  get settings(): Settings {
     return this.data.settings;
   }
 
-  setSetting(key, value) {
-    if (!(key in DEFAULTS.settings)) throw new Error(`unknown setting: ${key}`);
+  setSetting<K extends keyof Settings>(key: K, value: Settings[K]): Settings {
+    if (!(key in DEFAULTS.settings)) throw new Error(`unknown setting: ${String(key)}`);
     this.data.settings[key] = value;
     this.save();
     return this.data.settings;
   }
 
-  upsert(reminder) {
+  upsert(reminder: Reminder): Reminder {
     const i = this.data.reminders.findIndex((r) => r.id === reminder.id);
     if (i === -1) this.data.reminders.push(reminder);
     else this.data.reminders[i] = reminder;
@@ -89,15 +96,13 @@ class Store extends EventEmitter {
     return reminder;
   }
 
-  remove(id) {
+  remove(id: string): void {
     const before = this.data.reminders.length;
     this.data.reminders = this.data.reminders.filter((r) => r.id !== id);
     if (this.data.reminders.length !== before) this.save();
   }
 
-  find(id) {
-    return this.data.reminders.find((r) => r.id === id) || null;
+  find(id: string): Reminder | null {
+    return this.data.reminders.find((r) => r.id === id) ?? null;
   }
 }
-
-module.exports = { Store, DEFAULTS };

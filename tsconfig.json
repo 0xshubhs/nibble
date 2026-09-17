@@ -1,0 +1,28 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "CommonJS",
+    "moduleResolution": "node",
+
+    // rootDir/outDir are chosen so every compiled file sits at the same depth
+    // as its source: src/main/index.ts -> out/main/index.js. The main process
+    // resolves the preload, the renderer, the worker and the MCP relay through
+    // __dirname, and this keeps all of those paths correct without change.
+    "rootDir": "src",
+    "outDir": "out",
+
+    "strict": true,
+    "noImplicitOverride": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": false,
+    "useUnknownInCatchVariables": true,
+    "forceConsistentCasingInFileNames": true,
+
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "sourceMap": true
+  },
+  "include": ["src/**/*.ts"]
+}

@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-'use strict';
 
 /**
  * A stdio MCP server that relays to the running app.
@@ -8,10 +7,11 @@
  * the memory itself lives in the app, which already serves MCP over loopback
  * HTTP. This is the part in between.
  *
- * Deliberately zero-dependency. It has to run as a bare file under whatever
- * node the client happens to spawn -- including when it has been unpacked
- * beside a packaged app, where `require` cannot reach the app's node_modules.
- * Everything here is stdlib plus the built-in fetch.
+ * Deliberately zero-dependency, and it must stay that way: it has to run as a
+ * bare file under whatever node the client happens to spawn -- including when
+ * it has been unpacked beside a packaged app, where `require` cannot reach the
+ * app's node_modules. Everything here is stdlib plus the built-in fetch, and
+ * it compiles to a single self-contained file.
  *
  * Relaying rather than reading the store directly is also deliberate: the app
  * owns the files and is appending to them, and it already has the embedding
@@ -22,26 +22,41 @@
  *   the app's store.json in the usual per-user location
  *
  * Register it with:
- *   claude mcp add nibble -- node /path/to/src/mcp/stdio.js
+ *   claude mcp add nibble -- node /path/to/out/mcp/stdio.js
  */
 
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 
 const APP_DIR_NAME = 'Nibble';
 
+interface Config {
+  url: string;
+  token: string;
+}
+
+/** A JSON-RPC message, only as far as this relay needs to understand it. */
+interface RpcMessage {
+  jsonrpc: '2.0';
+  id?: string | number | null;
+  method?: string;
+  params?: unknown;
+  result?: unknown;
+  error?: unknown;
+}
+
 /* ---------------- config ---------------- */
 
-function defaultStorePath() {
+function defaultStorePath(): string {
   if (process.platform === 'darwin') {
     return path.join(os.homedir(), 'Library', 'Application Support', APP_DIR_NAME, 'store.json');
   }
   if (process.platform === 'win32') {
-    const base = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+    const base = process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming');
     return path.join(base, APP_DIR_NAME, 'store.json');
   }
-  const base = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  const base = process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config');
   return path.join(base, APP_DIR_NAME, 'store.json');
 }
 
@@ -49,14 +64,14 @@ function defaultStorePath() {
  * Re-read on every call rather than caching: the app may not have been running
  * when this process started, and the token can be regenerated from the UI.
  */
-function readConfig() {
+function readConfig(): Config {
   if (process.env.NIBBLE_MCP_URL && process.env.NIBBLE_MCP_TOKEN) {
     return { url: process.env.NIBBLE_MCP_URL, token: process.env.NIBBLE_MCP_TOKEN };
   }
-  const file = process.env.NIBBLE_STORE || defaultStorePath();
-  let settings;
+  const file = process.env.NIBBLE_STORE ?? defaultStorePath();
+  let settings: { mcpToken?: string; mcpPort?: number };
   try {
-    settings = JSON.parse(fs.readFileSync(file, 'utf8')).settings || {};
+    settings = (JSON.parse(fs.readFileSync(file, 'utf8')) as { settings?: object }).settings ?? {};
   } catch {
     throw new Error(
       `Could not read ${file}. Open ${APP_DIR_NAME} once and turn the connector on, ` +
@@ -67,21 +82,19 @@ function readConfig() {
     throw new Error(`${APP_DIR_NAME} has no connector token yet. Open it and turn the connector on.`);
   }
   return {
-    url: `http://127.0.0.1:${settings.mcpPort || 8787}/mcp`,
+    url: `http://127.0.0.1:${settings.mcpPort ?? 8787}/mcp`,
     token: settings.mcpToken,
   };
 }
 
 /* ---------------- transport ---------------- */
 
-const OUT = process.stdout;
-
 /** One JSON object per line -- the framing the stdio transport specifies. */
-function write(msg) {
-  OUT.write(JSON.stringify(msg) + '\n');
+function write(msg: unknown): void {
+  process.stdout.write(`${JSON.stringify(msg)}\n`);
 }
 
-function fail(id, code, message) {
+function fail(id: string | number | null | undefined, code: number, message: string): void {
   if (id === undefined || id === null) return; // notifications get no reply
   write({ jsonrpc: '2.0', id, error: { code, message } });
 }
@@ -90,9 +103,9 @@ function fail(id, code, message) {
  * The HTTP side may answer as plain JSON or as a one-shot SSE stream,
  * depending on what the server decides; handle both.
  */
-function parseBody(contentType, raw) {
+function parseBody(contentType: string | null, raw: string): unknown {
   if (!raw) return null;
-  if ((contentType || '').includes('text/event-stream')) {
+  if ((contentType ?? '').includes('text/event-stream')) {
     for (const line of raw.split('\n')) {
       if (line.startsWith('data:')) return JSON.parse(line.slice(5).trim());
     }
@@ -101,7 +114,7 @@ function parseBody(contentType, raw) {
   return JSON.parse(raw);
 }
 
-async function forward(message) {
+async function forward(message: RpcMessage): Promise<unknown> {
   const { url, token } = readConfig();
   const res = await fetch(url, {
     method: 'POST',
@@ -122,12 +135,13 @@ async function forward(message) {
 
 /* ---------------- loop ---------------- */
 
-async function handle(message) {
+async function handle(message: RpcMessage): Promise<void> {
   const { id } = message;
   try {
     const reply = await forward(message);
     if (reply !== null && reply !== undefined) write(reply);
   } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
     // A tool call that cannot reach the app should read as a tool failure the
     // model can recover from, not a dead connection.
     if (message.method === 'tools/call') {
@@ -136,35 +150,35 @@ async function handle(message) {
         id,
         result: {
           isError: true,
-          content: [{ type: 'text', text: `${APP_DIR_NAME} is not reachable: ${err.message}` }],
+          content: [{ type: 'text', text: `${APP_DIR_NAME} is not reachable: ${detail}` }],
         },
       });
     } else {
-      fail(id, -32603, err.message);
+      fail(id, -32603, detail);
     }
   }
 }
 
 let buffer = '';
 process.stdin.setEncoding('utf8');
-process.stdin.on('data', (chunk) => {
+process.stdin.on('data', (chunk: string) => {
   buffer += chunk;
-  let nl;
+  let nl: number;
   while ((nl = buffer.indexOf('\n')) !== -1) {
     const line = buffer.slice(0, nl).trim();
     buffer = buffer.slice(nl + 1);
     if (!line) continue;
 
-    let message;
+    let message: RpcMessage;
     try {
-      message = JSON.parse(line);
+      message = JSON.parse(line) as RpcMessage;
     } catch {
       fail(null, -32700, 'parse error');
       continue;
     }
     // Deliberately not awaited: requests are independent and the upstream is
     // stateless, so a slow search must not block the next call.
-    handle(message);
+    void handle(message);
   }
 });
 
@@ -177,5 +191,5 @@ process.on('SIGTERM', () => process.exit(0));
 try {
   readConfig();
 } catch (err) {
-  process.stderr.write(`nibble mcp relay: ${err.message}\n`);
+  process.stderr.write(`nibble mcp relay: ${err instanceof Error ? err.message : String(err)}\n`);
 }

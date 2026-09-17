@@ -1,5 +1,5 @@
-'use strict';
-const { systemPreferences } = require('electron');
+import { systemPreferences } from 'electron';
+import type { CaptureSource, PermissionResult, SourceInstance } from '../../types';
 
 /**
  * Meeting and system audio -> transcript. Phase 2.
@@ -27,55 +27,65 @@ const { systemPreferences } = require('electron');
  *                process, fed 16kHz mono PCM in ~30s windows.
  */
 
-const PLATFORM_NOTE = {
-  darwin: 'Microphone works. System audio needs a virtual output device (e.g. BlackHole) — macOS has no loopback.',
+const PLATFORM_NOTE: Partial<Record<NodeJS.Platform, string>> = {
+  darwin:
+    'Microphone works. System audio needs a virtual output device (e.g. BlackHole) — macOS has no loopback.',
   win32: 'Microphone and system audio both work through WASAPI loopback.',
   linux: 'Microphone and system audio both work through the PulseAudio monitor source.',
 };
 
-module.exports = {
+const source: CaptureSource = {
   id: 'audio',
   label: 'Meetings & audio',
-  description: 'Transcribes what you say and hear, on device. Not capturing yet — this is the next phase.',
+  description:
+    'Transcribes what you say and hear, on device. Not capturing yet — this is the next phase.',
   platforms: ['darwin', 'win32', 'linux'],
   permission: 'microphone',
   implemented: false,
 
   /** Real, live permission state — used by the UI to show what it would need. */
   available() {
-    const note = PLATFORM_NOTE[process.platform] || '';
+    const note = PLATFORM_NOTE[process.platform] ?? '';
     if (process.platform !== 'darwin') {
       return { ok: false, reason: 'Not wired up yet', permission: 'unknown', note };
     }
-    let status = 'unknown';
+    let permission = 'unknown';
     try {
-      status = systemPreferences.getMediaAccessStatus('microphone');
+      permission = systemPreferences.getMediaAccessStatus('microphone');
     } catch {
-      status = 'unknown';
+      permission = 'unknown';
     }
-    return { ok: false, reason: 'Not wired up yet', permission: status, note };
+    return { ok: false, reason: 'Not wired up yet', permission, note };
   },
 
   /** Prompts for microphone access. Safe to call before capture exists. */
-  async requestPermission() {
+  async requestPermission(): Promise<PermissionResult> {
     if (process.platform !== 'darwin') return { granted: true, status: 'not-required' };
     try {
       const granted = await systemPreferences.askForMediaAccess('microphone');
       return { granted, status: systemPreferences.getMediaAccessStatus('microphone') };
     } catch (err) {
-      return { granted: false, status: 'error', error: err.message };
+      return {
+        granted: false,
+        status: 'error',
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   },
 
-  create() {
+  create(): SourceInstance {
     return {
       start() {
         throw new Error('Audio capture is not implemented yet');
       },
-      stop() {},
+      stop() {
+        /* nothing running */
+      },
       state() {
         return { running: false, captured: 0 };
       },
     };
   },
 };
+
+export default source;

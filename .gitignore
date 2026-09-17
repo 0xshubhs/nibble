@@ -7,3 +7,5 @@ nibble-data/
 .itest/
 .mtest/
 .seed/
+
+out/

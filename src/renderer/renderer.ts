@@ -1,8 +1,13 @@
-'use strict';
+/**
+ * The window UI. No framework, no imports -- this file is loaded by a plain
+ * <script src>, so it must stay a script rather than a module. Its types come
+ * from the ambient declarations in env.d.ts.
+ */
 
-const $ = (id) => document.getElementById(id);
+const $ = <T extends HTMLElement = HTMLElement>(id: string): T =>
+  document.getElementById(id) as T;
 
-const REPEAT_LABEL = {
+const REPEAT_LABEL: Record<string, string> = {
   none: 'Once',
   hourly: 'Every hour',
   daily: 'Every day',
@@ -11,12 +16,17 @@ const REPEAT_LABEL = {
   custom: 'Custom',
 };
 
-let state = { reminders: [], settings: {}, meta: {} };
-let editingId = null;
+let state: AppSnapshot = {
+  reminders: [],
+  settings: {} as AppSnapshot['settings'],
+  meta: {} as AppSnapshot['meta'],
+  memory: null,
+};
+let editingId: string | null = null;
 
 /* ---------------- formatting ---------------- */
 
-function formatWhen(ts) {
+function formatWhen(ts: number): string {
   const d = new Date(ts);
   const now = new Date();
   const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -32,7 +42,7 @@ function formatWhen(ts) {
   return `${date} ${time}`;
 }
 
-function countdown(ts) {
+function countdown(ts: number): string {
   const ms = ts - Date.now();
   if (ms <= 0) return 'due now';
   const mins = Math.round(ms / 60000);
@@ -42,19 +52,9 @@ function countdown(ts) {
   return `in ${Math.round(hrs / 24)} days`;
 }
 
-/* ---------------- list ---------------- */
+/* ---------------- reminder list ---------------- */
 
-function render() {
-  const list = $('list');
-  const items = [...state.reminders].sort(
-    (a, b) => (a.snoozedUntil || a.at) - (b.snoozedUntil || b.at)
-  );
-
-  $('empty').hidden = items.length > 0;
-  list.replaceChildren(...items.map(renderItem));
-}
-
-function renderItem(r) {
+function renderItem(r: AppReminder): HTMLLIElement {
   const li = document.createElement('li');
   li.className = `item${r.enabled ? '' : ' is-off'}`;
   li.dataset.id = r.id;
@@ -71,7 +71,7 @@ function renderItem(r) {
   meta.className = 'item-meta';
 
   const when = document.createElement('span');
-  const at = r.snoozedUntil || r.at;
+  const at = r.snoozedUntil ?? r.at;
   when.textContent = r.enabled ? `${formatWhen(at)} · ${countdown(at)}` : formatWhen(at);
   meta.append(when);
 
@@ -104,7 +104,7 @@ function renderItem(r) {
   const cb = document.createElement('input');
   cb.type = 'checkbox';
   cb.checked = r.enabled;
-  cb.addEventListener('change', () => window.api.toggleReminder(r.id, cb.checked));
+  cb.addEventListener('change', () => void window.api.toggleReminder(r.id, cb.checked));
   toggle.append(cb, document.createElement('span'));
 
   const edit = document.createElement('button');
@@ -117,18 +117,38 @@ function renderItem(r) {
   return li;
 }
 
-/* ---------------- editor ---------------- */
+function render(): void {
+  const list = $('list');
+  const items = [...state.reminders].sort(
+    (a, b) => (a.snoozedUntil ?? a.at) - (b.snoozedUntil ?? b.at)
+  );
 
-function openEditor(r) {
-  editingId = r?.id || null;
+  $('empty').hidden = items.length > 0;
+  list.replaceChildren(...items.map(renderItem));
+}
+
+/* ---------------- reminder editor ---------------- */
+
+// Local-time values for <input type="date"/"time">, which are timezone-naive.
+const pad = (n: number): string => String(n).padStart(2, '0');
+const toDateInput = (d: Date): string =>
+  `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const toTimeInput = (d: Date): string => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+function syncIntervalVisibility(): void {
+  $('f-interval-wrap').hidden = $<HTMLSelectElement>('f-repeat').value !== 'custom';
+}
+
+function openEditor(r: AppReminder | null): void {
+  editingId = r?.id ?? null;
   const at = new Date(r?.at ?? Date.now() + 10 * 60000);
 
-  $('f-title').value = r?.title || '';
-  $('f-body').value = r?.body || '';
-  $('f-date').value = toDateInput(at);
-  $('f-time').value = toTimeInput(at);
-  $('f-repeat').value = r?.repeat || 'none';
-  $('f-interval').value = r?.intervalMinutes || 60;
+  $<HTMLInputElement>('f-title').value = r?.title ?? '';
+  $<HTMLInputElement>('f-body').value = r?.body ?? '';
+  $<HTMLInputElement>('f-date').value = toDateInput(at);
+  $<HTMLInputElement>('f-time').value = toTimeInput(at);
+  $<HTMLSelectElement>('f-repeat').value = r?.repeat ?? 'none';
+  $<HTMLInputElement>('f-interval').value = String(r?.intervalMinutes ?? 60);
   $('delete-btn').hidden = !editingId;
   $('save-btn').textContent = editingId ? 'Save changes' : 'Add reminder';
 
@@ -137,39 +157,30 @@ function openEditor(r) {
   $('f-title').focus();
 }
 
-function closeEditor() {
+function closeEditor(): void {
   $('editor').hidden = true;
   editingId = null;
 }
 
-// Local-time values for <input type="date"/"time">, which are timezone-naive.
-const pad = (n) => String(n).padStart(2, '0');
-const toDateInput = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-const toTimeInput = (d) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-
-function syncIntervalVisibility() {
-  $('f-interval-wrap').hidden = $('f-repeat').value !== 'custom';
-}
-
-async function submitEditor(e) {
+async function submitEditor(e: Event): Promise<void> {
   e.preventDefault();
-  const [y, m, d] = $('f-date').value.split('-').map(Number);
-  const [hh, mm] = $('f-time').value.split(':').map(Number);
+  const [y, m, d] = $<HTMLInputElement>('f-date').value.split('-').map(Number);
+  const [hh, mm] = $<HTMLInputElement>('f-time').value.split(':').map(Number);
   if (!y || Number.isNaN(hh)) return;
 
   await window.api.saveReminder({
     id: editingId,
-    title: $('f-title').value,
-    body: $('f-body').value,
+    title: $<HTMLInputElement>('f-title').value,
+    body: $<HTMLInputElement>('f-body').value,
     at: new Date(y, m - 1, d, hh, mm, 0, 0).getTime(),
-    repeat: $('f-repeat').value,
-    intervalMinutes: Number($('f-interval').value),
+    repeat: $<HTMLSelectElement>('f-repeat').value,
+    intervalMinutes: Number($<HTMLInputElement>('f-interval').value),
     enabled: true,
   });
   closeEditor();
 }
 
-async function deleteCurrent() {
+async function deleteCurrent(): Promise<void> {
   if (!editingId) return;
   await window.api.deleteReminder(editingId);
   closeEditor();
@@ -177,15 +188,19 @@ async function deleteCurrent() {
 
 /* ---------------- settings ---------------- */
 
-function renderSettings() {
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+}
+
+function renderSettings(): void {
   const s = state.settings;
   const m = state.meta;
 
-  $('s-login').checked = Boolean(s.launchAtLogin);
-  $('s-hidden').checked = Boolean(s.startHidden);
-  $('s-dock').checked = Boolean(s.showInDock);
-  $('s-sound').checked = Boolean(s.notificationSound);
-  $('s-snooze').value = s.snoozeMinutes ?? 10;
+  $<HTMLInputElement>('s-login').checked = Boolean(s.launchAtLogin);
+  $<HTMLInputElement>('s-hidden').checked = Boolean(s.startHidden);
+  $<HTMLInputElement>('s-dock').checked = Boolean(s.showInDock);
+  $<HTMLInputElement>('s-sound').checked = Boolean(s.notificationSound);
+  $<HTMLInputElement>('s-snooze').value = String(s.snoozeMinutes ?? 10);
 
   // The Dock toggle only means anything on macOS.
   $('dock-row').hidden = m.platform !== 'darwin';
@@ -206,95 +221,10 @@ function renderSettings() {
     m.portable
       ? 'Portable: everything is stored beside the executable.'
       : 'Installed: stored in the usual per-user app folder.'
-  } <code>${escapeHtml(m.dataDir || '')}</code>`;
+  } <code>${escapeHtml(m.dataDir ?? '')}</code>`;
 
-  $('version').textContent = `v${m.version || '0.0.0'}`;
+  $('version').textContent = `v${m.version ?? '0.0.0'}`;
 }
-
-function escapeHtml(s) {
-  return s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-}
-
-/* ---------------- wiring ---------------- */
-
-function bind() {
-  document.querySelectorAll('.tab').forEach((tab) => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('is-active', t === tab));
-      document.querySelectorAll('.panel').forEach((p) => {
-        p.classList.toggle('is-active', p.id === `panel-${tab.dataset.tab}`);
-      });
-    });
-  });
-
-  $('new-btn').addEventListener('click', () => openEditor(null));
-  $('cancel-btn').addEventListener('click', closeEditor);
-  $('delete-btn').addEventListener('click', deleteCurrent);
-  $('editor').addEventListener('submit', submitEditor);
-  $('f-repeat').addEventListener('change', syncIntervalVisibility);
-
-  $('s-login').addEventListener('change', (e) =>
-    window.api.setSetting('launchAtLogin', e.target.checked)
-  );
-  $('s-hidden').addEventListener('change', (e) =>
-    window.api.setSetting('startHidden', e.target.checked)
-  );
-  $('s-dock').addEventListener('change', (e) =>
-    window.api.setSetting('showInDock', e.target.checked)
-  );
-  $('s-sound').addEventListener('change', (e) =>
-    window.api.setSetting('notificationSound', e.target.checked)
-  );
-  $('s-snooze').addEventListener('change', (e) =>
-    window.api.setSetting('snoozeMinutes', Math.max(1, Number(e.target.value) || 10))
-  );
-
-  $('test-btn').addEventListener('click', () => window.api.testNotification(null));
-  $('reveal-btn').addEventListener('click', () => window.api.revealData());
-  $('quit-btn').addEventListener('click', () => window.api.quit());
-
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !$('editor').hidden) closeEditor();
-    if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
-      e.preventDefault();
-      openEditor(null);
-    }
-  });
-
-  bindMemory();
-
-  window.api.onState((next) => {
-    const hadMemory = Boolean(state.memory);
-    state = next;
-    render();
-    renderSettings();
-    renderMemory();
-    // Refresh the result list once memory finishes starting, so the tab is
-    // not stuck on its empty state after a slow model load.
-    if (!hadMemory && state.memory) runSearch();
-  });
-
-  window.api.onFocusReminder((id) => {
-    if (id === 'new') return openEditor(null);
-    const el = document.querySelector(`.item[data-id="${CSS.escape(id)}"]`);
-    if (!el) return;
-    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    el.classList.add('is-flash');
-    setTimeout(() => el.classList.remove('is-flash'), 1600);
-  });
-
-  // Keeps the "in 12 min" labels honest without a full re-render storm.
-  setInterval(render, 30_000);
-}
-
-(async function init() {
-  bind();
-  state = await window.api.getState();
-  render();
-  renderSettings();
-  renderMemory();
-  runSearch();
-})();
 
 /* ============================================================
    memory tab
@@ -302,18 +232,18 @@ function bind() {
 
 const mem = {
   q: '',
-  results: [],
+  results: [] as AppHit[],
   revealToken: false,
   searchSeq: 0,
 };
 
-function fmtBytes(n) {
+function fmtBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${Math.round(n / 1024)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function ago(ts) {
+function ago(ts: number): string {
   const mins = Math.round((Date.now() - ts) / 60000);
   if (mins < 1) return 'just now';
   if (mins < 60) return `${mins} min ago`;
@@ -325,7 +255,7 @@ function ago(ts) {
 }
 
 /** Wraps query terms in <mark> without ever injecting the text as HTML. */
-function highlight(container, text, query) {
+function highlight(container: HTMLElement, text: string, query: string): void {
   const terms = query
     .toLowerCase()
     .split(/[^a-z0-9]+/i)
@@ -334,19 +264,23 @@ function highlight(container, text, query) {
     container.textContent = text;
     return;
   }
-  const re = new RegExp(`(${terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'ig');
+  const re = new RegExp(
+    `(${terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`,
+    'ig'
+  );
   let last = 0;
   for (const m of text.matchAll(re)) {
-    if (m.index > last) container.append(text.slice(last, m.index));
+    const index = m.index ?? 0;
+    if (index > last) container.append(text.slice(last, index));
     const el = document.createElement('mark');
     el.textContent = m[0];
     container.append(el);
-    last = m.index + m[0].length;
+    last = index + m[0].length;
   }
   if (last < text.length) container.append(text.slice(last));
 }
 
-function renderHits() {
+function renderHits(): void {
   const list = $('m-results');
   const empty = $('m-empty');
 
@@ -402,9 +336,8 @@ function renderHits() {
       const forget = document.createElement('button');
       forget.className = 'btn btn-quiet';
       forget.textContent = 'Forget';
-      forget.addEventListener('click', async () => {
-        await window.api.forget(h.id);
-        runSearch();
+      forget.addEventListener('click', () => {
+        void window.api.forget(h.id).then(runSearch);
       });
       foot.append(when, spacer, forget);
 
@@ -414,7 +347,7 @@ function renderHits() {
   );
 }
 
-async function runSearch() {
+async function runSearch(): Promise<void> {
   const seq = ++mem.searchSeq;
   const q = mem.q.trim();
 
@@ -435,18 +368,18 @@ async function runSearch() {
         : `Most recent of ${s.chunks} chunks.`;
 }
 
-function renderSources() {
+function renderSources(): void {
   const m = state.memory;
   if (!m) return;
 
-  $('m-pause').checked = m.paused;
+  $<HTMLInputElement>('m-pause').checked = m.paused;
   $('pause-text').textContent = m.paused
     ? 'Capture is paused. Sources keep running but nothing is stored.'
     : 'Capture is running.';
   $('pause-row').classList.toggle('warn', m.paused);
 
   $('m-sources').replaceChildren(
-    ...m.sources.map((src) => {
+    ...m.sources.map((src: AppSourceView) => {
       const li = document.createElement('li');
       if (!src.enabled) li.className = 'is-off';
 
@@ -486,7 +419,7 @@ function renderSources() {
         btn.style.marginTop = '7px';
         btn.textContent =
           src.permission === 'screen' ? 'Open Screen Recording settings' : 'Grant microphone access';
-        btn.addEventListener('click', () => window.api.requestCapturePermission(src.id));
+        btn.addEventListener('click', () => void window.api.requestCapturePermission(src.id));
         info.append(btn);
       }
 
@@ -496,12 +429,13 @@ function renderSources() {
       cb.type = 'checkbox';
       cb.checked = src.enabled;
       cb.disabled = !src.supported || !src.implemented;
-      cb.addEventListener('change', async () => {
-        const res = await window.api.setCapture(src.id, cb.checked);
-        if (!res.ok) {
-          cb.checked = false;
-          $('m-hint').textContent = res.error || 'Could not start that source.';
-        }
+      cb.addEventListener('change', () => {
+        void window.api.setCapture(src.id, cb.checked).then((res) => {
+          if (!res.ok) {
+            cb.checked = false;
+            $('m-hint').textContent = res.error ?? 'Could not start that source.';
+          }
+        });
       });
       toggle.append(cb, document.createElement('span'));
 
@@ -511,48 +445,53 @@ function renderSources() {
   );
 
   // The folder list only matters when the Folders source is on.
-  const filesOn = m.sources.find((s) => s.id === 'files')?.enabled;
+  const filesOn = m.sources.find((s: AppSourceView) => s.id === 'files')?.enabled;
   $('m-folder-block').hidden = !filesOn;
-  if (filesOn) {
-    const folders = state.settings.memoryFolders || [];
-    $('m-folders').replaceChildren(
-      ...(folders.length
-        ? folders.map((f) => {
-            const li = document.createElement('li');
-            const d = document.createElement('div');
-            const p = document.createElement('div');
-            p.className = 'folder-path';
-            p.textContent = f;
-            p.title = f;
-            d.append(p);
-            const rm = document.createElement('button');
-            rm.className = 'btn btn-quiet';
-            rm.textContent = 'Remove';
-            rm.addEventListener('click', () => window.api.removeFolder(f));
-            li.append(d, rm);
-            return li;
-          })
-        : [
-            (() => {
-              const li = document.createElement('li');
-              const d = document.createElement('div');
-              d.innerHTML = '<p>No folders yet. Point it at your notes.</p>';
-              li.append(d);
-              return li;
-            })(),
-          ])
-    );
+  if (!filesOn) return;
+
+  const folders = state.settings.memoryFolders ?? [];
+  if (!folders.length) {
+    const li = document.createElement('li');
+    const d = document.createElement('div');
+    const p = document.createElement('p');
+    p.textContent = 'No folders yet. Point it at your notes.';
+    d.append(p);
+    li.append(d);
+    $('m-folders').replaceChildren(li);
+    return;
   }
+
+  $('m-folders').replaceChildren(
+    ...folders.map((f: string) => {
+      const li = document.createElement('li');
+      const d = document.createElement('div');
+      const p = document.createElement('div');
+      p.className = 'folder-path';
+      p.textContent = f;
+      p.title = f;
+      d.append(p);
+      const rm = document.createElement('button');
+      rm.className = 'btn btn-quiet';
+      rm.textContent = 'Remove';
+      rm.addEventListener('click', () => void window.api.removeFolder(f));
+      li.append(d, rm);
+      return li;
+    })
+  );
 }
 
-function renderConnector() {
-  const info = state.memory?.mcp;
+function renderConnector(): void {
+  const info: AppMcpInfo | undefined = state.memory?.mcp;
   if (!info) return;
 
-  $('m-mcp').checked = info.running;
+  $<HTMLInputElement>('m-mcp').checked = info.running;
   $('mcp-detail').hidden = !info.running;
   $('mcp-state').textContent = info.running
-    ? `Running on 127.0.0.1:${info.port}. ${info.calls.length ? `${info.calls.length} recent call${info.calls.length === 1 ? '' : 's'}.` : 'No calls yet.'}`
+    ? `Running on 127.0.0.1:${info.port}. ${
+        info.calls.length
+          ? `${info.calls.length} recent call${info.calls.length === 1 ? '' : 's'}.`
+          : 'No calls yet.'
+      }`
     : info.error
       ? `Off — last error: ${info.error}`
       : 'Off. Turn it on to let Claude, ChatGPT or any MCP client read this memory.';
@@ -560,13 +499,13 @@ function renderConnector() {
   if (!info.running) return;
 
   $('mcp-cli').textContent = `claude mcp add nibble -- node ${state.meta.relay}`;
-  $('mcp-url').textContent = info.url;
-  $('mcp-token').textContent = mem.revealToken ? info.token : '•'.repeat(28);
+  $('mcp-url').textContent = info.url ?? '';
+  $('mcp-token').textContent = mem.revealToken ? (info.token ?? '') : '•'.repeat(28);
   $('mcp-token').classList.toggle('masked', !mem.revealToken);
   $('mcp-reveal').textContent = mem.revealToken ? 'Hide' : 'Show';
 }
 
-function renderMemoryStats() {
+function renderMemoryStats(): void {
   const m = state.memory;
   if (!m) {
     $('m-stats').textContent = 'Memory is still starting…';
@@ -580,31 +519,35 @@ function renderMemoryStats() {
     (s.tombstones ? ` · ${s.tombstones} forgotten, reclaim with Compact` : '');
 
   const e = s.embedder;
-  const statusText = {
-    ready: 'ready',
-    loading: 'starting',
-    downloading: `downloading the model, ${e.progress}%`,
-    'needs-key': 'needs an API key',
-    error: `error: ${e.error}`,
-    stopped: 'stopped',
-    idle: 'idle',
-  }[e.status] || e.status;
+  const statusText =
+    (
+      {
+        ready: 'ready',
+        loading: 'starting',
+        downloading: `downloading the model, ${e.progress}%`,
+        'needs-key': 'needs an API key',
+        error: `error: ${e.error}`,
+        stopped: 'stopped',
+        idle: 'idle',
+      } as Record<string, string>
+    )[e.status] ?? e.status;
+
   $('m-model').textContent =
     `Embedding with ${e.model} (${e.backend === 'local' ? 'on this device' : e.provider}, ${e.dim} dims) — ${statusText}.`;
 }
 
-function renderMemory() {
+function renderMemory(): void {
   renderSources();
   renderConnector();
   renderMemoryStats();
 }
 
-function bindMemory() {
-  let debounce = null;
+function bindMemory(): void {
+  let debounce: ReturnType<typeof setTimeout> | null = null;
   $('m-q').addEventListener('input', (e) => {
-    mem.q = e.target.value;
-    clearTimeout(debounce);
-    debounce = setTimeout(runSearch, 180);
+    mem.q = (e.target as HTMLInputElement).value;
+    if (debounce) clearTimeout(debounce);
+    debounce = setTimeout(() => void runSearch(), 180);
   });
 
   $('m-add').addEventListener('click', () => {
@@ -615,26 +558,32 @@ function bindMemory() {
   $('m-cancel').addEventListener('click', () => {
     $('m-editor').hidden = true;
   });
-  $('m-editor').addEventListener('submit', async (e) => {
+  $('m-editor').addEventListener('submit', (e) => {
     e.preventDefault();
-    const text = $('m-text').value.trim();
+    const text = $<HTMLTextAreaElement>('m-text').value.trim();
     if (!text) return;
-    const res = await window.api.captureNote({ text, title: $('m-title').value.trim() });
-    $('m-text').value = '';
-    $('m-title').value = '';
-    $('m-editor').hidden = true;
-    $('m-hint').textContent = res.added
-      ? `Remembered in ${res.added} chunk${res.added === 1 ? '' : 's'}.`
-      : `Not stored (${res.skipped}).`;
-    runSearch();
+    void window.api
+      .captureNote({ text, title: $<HTMLInputElement>('m-title').value.trim() })
+      .then((res) => {
+        $<HTMLTextAreaElement>('m-text').value = '';
+        $<HTMLInputElement>('m-title').value = '';
+        $('m-editor').hidden = true;
+        $('m-hint').textContent = res.added
+          ? `Remembered in ${res.added} chunk${res.added === 1 ? '' : 's'}.`
+          : `Not stored (${res.skipped}).`;
+        return runSearch();
+      });
   });
 
-  $('m-pause').addEventListener('change', (e) => window.api.setPaused(e.target.checked));
-  $('m-add-folder').addEventListener('click', () => window.api.addFolder());
-  $('m-mcp').addEventListener('change', (e) => window.api.setMcp(e.target.checked));
-  $('m-compact').addEventListener('click', async () => {
-    await window.api.compactMemory();
-    runSearch();
+  $('m-pause').addEventListener('change', (e) =>
+    void window.api.setPaused((e.target as HTMLInputElement).checked)
+  );
+  $('m-add-folder').addEventListener('click', () => void window.api.addFolder());
+  $('m-mcp').addEventListener('change', (e) =>
+    void window.api.setMcp((e.target as HTMLInputElement).checked)
+  );
+  $('m-compact').addEventListener('click', () => {
+    void window.api.compactMemory().then(runSearch);
   });
 
   $('mcp-reveal').addEventListener('click', () => {
@@ -643,22 +592,114 @@ function bindMemory() {
   });
   $('mcp-regen').addEventListener('click', () => {
     mem.revealToken = true;
-    window.api.regenerateMcpToken();
+    void window.api.regenerateMcpToken();
   });
 
-  document.querySelectorAll('.copy').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const el = $(btn.dataset.copy);
+  document.querySelectorAll<HTMLButtonElement>('.copy').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const target = btn.dataset.copy ?? '';
       // The token element is masked on screen; copy the real value.
-      const value = btn.dataset.copy === 'mcp-token' ? state.memory?.mcp?.token || '' : el.textContent;
-      try {
-        await navigator.clipboard.writeText(value);
-        const was = btn.textContent;
-        btn.textContent = 'Copied';
-        setTimeout(() => { btn.textContent = was; }, 1200);
-      } catch {
-        btn.textContent = 'Press ⌘C';
-      }
+      const value =
+        target === 'mcp-token' ? (state.memory?.mcp.token ?? '') : ($(target).textContent ?? '');
+      navigator.clipboard.writeText(value).then(
+        () => {
+          const was = btn.textContent;
+          btn.textContent = 'Copied';
+          setTimeout(() => {
+            btn.textContent = was;
+          }, 1200);
+        },
+        () => {
+          btn.textContent = 'Press ⌘C';
+        }
+      );
     });
   });
 }
+
+/* ---------------- wiring ---------------- */
+
+function bind(): void {
+  document.querySelectorAll<HTMLButtonElement>('.tab').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('is-active', t === tab));
+      document.querySelectorAll('.panel').forEach((p) => {
+        p.classList.toggle('is-active', p.id === `panel-${tab.dataset.tab}`);
+      });
+    });
+  });
+
+  $('new-btn').addEventListener('click', () => openEditor(null));
+  $('cancel-btn').addEventListener('click', closeEditor);
+  $('delete-btn').addEventListener('click', () => void deleteCurrent());
+  $('editor').addEventListener('submit', (e) => void submitEditor(e));
+  $('f-repeat').addEventListener('change', syncIntervalVisibility);
+
+  $('s-login').addEventListener('change', (e) =>
+    void window.api.setSetting('launchAtLogin', (e.target as HTMLInputElement).checked)
+  );
+  $('s-hidden').addEventListener('change', (e) =>
+    void window.api.setSetting('startHidden', (e.target as HTMLInputElement).checked)
+  );
+  $('s-dock').addEventListener('change', (e) =>
+    void window.api.setSetting('showInDock', (e.target as HTMLInputElement).checked)
+  );
+  $('s-sound').addEventListener('change', (e) =>
+    void window.api.setSetting('notificationSound', (e.target as HTMLInputElement).checked)
+  );
+  $('s-snooze').addEventListener('change', (e) =>
+    void window.api.setSetting(
+      'snoozeMinutes',
+      Math.max(1, Number((e.target as HTMLInputElement).value) || 10)
+    )
+  );
+
+  $('test-btn').addEventListener('click', () => void window.api.testNotification(null));
+  $('reveal-btn').addEventListener('click', () => void window.api.revealData());
+  $('quit-btn').addEventListener('click', () => void window.api.quit());
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !$('editor').hidden) closeEditor();
+    if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+      e.preventDefault();
+      openEditor(null);
+    }
+  });
+
+  bindMemory();
+
+  window.api.onState((next) => {
+    const hadMemory = Boolean(state.memory);
+    state = next;
+    render();
+    renderSettings();
+    renderMemory();
+    // Refresh the result list once memory finishes starting, so the tab is
+    // not stuck on its empty state after a slow model load.
+    if (!hadMemory && state.memory) void runSearch();
+  });
+
+  window.api.onFocusReminder((id) => {
+    if (id === 'new') {
+      openEditor(null);
+      return;
+    }
+    const el = document.querySelector<HTMLElement>(`.item[data-id="${CSS.escape(id)}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.classList.add('is-flash');
+    setTimeout(() => el.classList.remove('is-flash'), 1600);
+  });
+
+  // Keeps the "in 12 min" labels honest without a full re-render storm.
+  setInterval(render, 30_000);
+}
+
+void (async function init(): Promise<void> {
+  bind();
+  state = await window.api.getState();
+  render();
+  renderSettings();
+  renderMemory();
+  void runSearch();
+})();

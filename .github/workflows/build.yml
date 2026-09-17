@@ -41,9 +41,18 @@ jobs:
 
       - run: npm ci
 
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
       - run: npm run icons
 
-      - name: Build
+      - name: Compile
+        run: npm run build:ts
+
+      - name: Package
         run: npx electron-builder ${{ matrix.args }} --publish never
         env:
           # No Apple/Windows certificates in CI yet, so build unsigned rather

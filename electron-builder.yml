@@ -11,7 +11,7 @@ directories:
 afterPack: scripts/adhoc-sign.js
 
 files:
-  - src/**/*
+  - out/**/*
   - assets/**/*
   - package.json
   - "!**/*.map"
@@ -27,7 +27,7 @@ asarUnpack:
   # The stdio relay is spawned by a plain `node` outside Electron, which
   # cannot read from inside the archive. It has no dependencies, so this
   # single file is all that needs unpacking.
-  - "src/mcp/stdio.js"
+  - "out/mcp/stdio.js"
 compression: maximum
 
 # ---------------- macOS ----------------

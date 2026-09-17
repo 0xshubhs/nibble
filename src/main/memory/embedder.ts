@@ -1,7 +1,7 @@
-'use strict';
-const path = require('path');
-const { EventEmitter } = require('events');
-const { utilityProcess, app, net } = require('electron');
+import path from 'path';
+import { EventEmitter } from 'events';
+import { utilityProcess, net } from 'electron';
+import type { EmbedBackend, EmbedProvider, EmbedderState, StatusEvent } from '../../types';
 
 /**
  * Turns text into vectors, through one of two backends.
@@ -16,9 +16,18 @@ const { utilityProcess, app, net } = require('electron');
  * store uses to decide whether existing vectors are still valid.
  */
 
-const LOCAL_MODEL = 'Xenova/all-MiniLM-L6-v2';
+export const LOCAL_MODEL = 'Xenova/all-MiniLM-L6-v2';
 
-const CLOUD = {
+interface CloudSpec {
+  id: string;
+  dim: number;
+  url: string;
+  build(texts: string[]): unknown;
+  headers(key: string): Record<string, string>;
+  parse(json: any): Float32Array[];
+}
+
+export const CLOUD: Record<EmbedProvider, CloudSpec> = {
   gemini: {
     id: 'gemini-embedding-001',
     dim: 768,
@@ -31,7 +40,7 @@ const CLOUD = {
       })),
     }),
     headers: (key) => ({ 'x-goog-api-key': key }),
-    parse: (json) => json.embeddings.map((e) => Float32Array.from(e.values)),
+    parse: (json) => json.embeddings.map((e: { values: number[] }) => Float32Array.from(e.values)),
   },
   voyage: {
     id: 'voyage-3.5-lite',
@@ -39,12 +48,12 @@ const CLOUD = {
     url: 'https://api.voyageai.com/v1/embeddings',
     build: (texts) => ({ input: texts, model: 'voyage-3.5-lite', input_type: 'document' }),
     headers: (key) => ({ Authorization: `Bearer ${key}` }),
-    parse: (json) => json.data.map((e) => Float32Array.from(e.embedding)),
+    parse: (json) => json.data.map((e: { embedding: number[] }) => Float32Array.from(e.embedding)),
   },
 };
 
 /** Cloud APIs do not all guarantee unit vectors; the store assumes they are. */
-function normalize(v) {
+function normalize(v: Float32Array): Float32Array {
   let sum = 0;
   for (let i = 0; i < v.length; i++) sum += v[i] * v[i];
   const n = Math.sqrt(sum);
@@ -53,59 +62,94 @@ function normalize(v) {
   return v;
 }
 
-class Embedder extends EventEmitter {
-  constructor({ cacheDir, backend = 'local', provider = 'gemini', apiKey = '', allowDownload = true }) {
+/* ---------------- worker protocol ---------------- */
+
+export type WorkerIn =
+  | { type: 'init'; cacheDir: string; model: string; allowDownload: boolean }
+  | { type: 'embed'; id: number; texts: string[] };
+
+export type WorkerOut =
+  | { type: 'progress'; pct: number; file: string }
+  | { type: 'ready'; model: string; dim: number }
+  | { type: 'error'; id?: number; message: string }
+  | { type: 'result'; id: number; dim: number; vectors: Float32Array[] };
+
+export interface EmbedderOptions {
+  cacheDir: string;
+  backend?: EmbedBackend;
+  provider?: EmbedProvider;
+  apiKey?: string;
+  allowDownload?: boolean;
+}
+
+interface EmbedderEvents {
+  status: [EmbedderState & StatusEvent];
+}
+
+interface Pending {
+  resolve(vectors: Float32Array[]): void;
+  reject(err: Error): void;
+}
+
+export class Embedder extends EventEmitter<EmbedderEvents> {
+  readonly cacheDir: string;
+  readonly backend: EmbedBackend;
+  readonly provider: EmbedProvider;
+  readonly apiKey: string;
+  private readonly allowDownload: boolean;
+
+  private child: Electron.UtilityProcess | null = null;
+  ready = false;
+  dim = 0;
+  modelId: string | null = null;
+  status = 'idle';
+  progress = 0;
+  lastError: string | null = null;
+
+  private seq = 0;
+  private waiting = new Map<number, Pending>();
+
+  constructor(opts: EmbedderOptions) {
     super();
-    this.cacheDir = cacheDir;
-    this.backend = backend;
-    this.provider = provider;
-    this.apiKey = apiKey;
-    this.allowDownload = allowDownload;
-
-    this.child = null;
-    this.ready = false;
-    this.dim = 0;
-    this.modelId = null;
-    this.status = 'idle';
-    this.progress = 0;
-    this.lastError = null;
-
-    this._seq = 0;
-    this._waiting = new Map();
+    this.cacheDir = opts.cacheDir;
+    this.backend = opts.backend ?? 'local';
+    this.provider = opts.provider ?? 'gemini';
+    this.apiKey = opts.apiKey ?? '';
+    this.allowDownload = opts.allowDownload !== false;
   }
 
   /** Model id that identifies this vector space, for the store's guard. */
-  currentModel() {
+  currentModel(): string {
     return this.backend === 'local' ? LOCAL_MODEL : `${this.provider}:${CLOUD[this.provider].id}`;
   }
 
-  expectedDim() {
+  expectedDim(): number {
     return this.backend === 'local' ? 384 : CLOUD[this.provider].dim;
   }
 
-  async start() {
+  async start(): Promise<boolean> {
     if (this.backend === 'cloud') {
       const spec = CLOUD[this.provider];
       if (!spec) throw new Error(`unknown provider: ${this.provider}`);
       this.ready = Boolean(this.apiKey);
       this.dim = spec.dim;
       this.modelId = this.currentModel();
-      this._setStatus(this.ready ? 'ready' : 'needs-key');
+      this.setStatus(this.ready ? 'ready' : 'needs-key');
       return this.ready;
     }
-    return this._startLocal();
+    return this.startLocal();
   }
 
-  _setStatus(status, extra = {}) {
+  private setStatus(status: string): void {
     this.status = status;
-    this.emit('status', { status, dim: this.dim, model: this.modelId, progress: this.progress, error: this.lastError, ...extra });
+    this.emit('status', { ...this.state(), status });
   }
 
-  _startLocal() {
+  private startLocal(): Promise<boolean> {
     if (this.child) return Promise.resolve(this.ready);
 
-    return new Promise((resolve) => {
-      this._setStatus('loading');
+    return new Promise<boolean>((resolve) => {
+      this.setStatus('loading');
 
       const script = path.join(__dirname, 'embed-worker.js');
       this.child = utilityProcess.fork(script, [], {
@@ -113,12 +157,12 @@ class Embedder extends EventEmitter {
         stdio: 'ignore',
       });
 
-      this.child.on('message', (msg) => {
+      this.child.on('message', (msg: WorkerOut) => {
         if (!msg || typeof msg !== 'object') return;
 
         if (msg.type === 'progress') {
           this.progress = msg.pct;
-          this._setStatus('downloading');
+          this.setStatus('downloading');
           return;
         }
         if (msg.type === 'ready') {
@@ -127,25 +171,26 @@ class Embedder extends EventEmitter {
           this.modelId = msg.model;
           this.progress = 100;
           this.lastError = null;
-          this._setStatus('ready');
+          this.setStatus('ready');
           resolve(true);
           return;
         }
         if (msg.type === 'error') {
           this.lastError = msg.message;
-          if (msg.id && this._waiting.has(msg.id)) {
-            this._waiting.get(msg.id).reject(new Error(msg.message));
-            this._waiting.delete(msg.id);
+          const pending = msg.id !== undefined ? this.waiting.get(msg.id) : undefined;
+          if (pending && msg.id !== undefined) {
+            pending.reject(new Error(msg.message));
+            this.waiting.delete(msg.id);
           } else {
-            this._setStatus('error');
+            this.setStatus('error');
             resolve(false);
           }
           return;
         }
         if (msg.type === 'result') {
-          const pending = this._waiting.get(msg.id);
+          const pending = this.waiting.get(msg.id);
           if (pending) {
-            this._waiting.delete(msg.id);
+            this.waiting.delete(msg.id);
             pending.resolve(msg.vectors);
           }
         }
@@ -155,46 +200,45 @@ class Embedder extends EventEmitter {
         this.child = null;
         this.ready = false;
         // Fail every in-flight batch rather than leaving callers hanging.
-        for (const [, p] of this._waiting) p.reject(new Error('embedder stopped'));
-        this._waiting.clear();
-        if (this.status !== 'stopped') this._setStatus('stopped');
+        for (const [, p] of this.waiting) p.reject(new Error('embedder stopped'));
+        this.waiting.clear();
+        if (this.status !== 'stopped') this.setStatus('stopped');
       });
 
-      this.child.postMessage({
+      const init: WorkerIn = {
         type: 'init',
         cacheDir: this.cacheDir,
         model: LOCAL_MODEL,
         allowDownload: this.allowDownload,
-      });
+      };
+      this.child.postMessage(init);
     });
   }
 
-  /**
-   * @param {string[]} texts
-   * @returns {Promise<Float32Array[]>}
-   */
-  async embed(texts) {
+  async embed(texts: string[]): Promise<Float32Array[]> {
     if (!texts.length) return [];
-    if (this.backend === 'cloud') return this._embedCloud(texts);
+    if (this.backend === 'cloud') return this.embedCloud(texts);
 
-    if (!this.ready) await this._startLocal();
-    if (!this.ready) throw new Error(this.lastError || 'embedder not ready');
+    if (!this.ready) await this.startLocal();
+    if (!this.ready || !this.child) throw new Error(this.lastError ?? 'embedder not ready');
 
-    const id = ++this._seq;
-    return new Promise((resolve, reject) => {
-      this._waiting.set(id, { resolve, reject });
-      this.child.postMessage({ type: 'embed', id, texts });
+    const id = ++this.seq;
+    const child = this.child;
+    return new Promise<Float32Array[]>((resolve, reject) => {
+      this.waiting.set(id, { resolve, reject });
+      const msg: WorkerIn = { type: 'embed', id, texts };
+      child.postMessage(msg);
       // A wedged model should not pin the queue forever.
       setTimeout(() => {
-        if (this._waiting.has(id)) {
-          this._waiting.delete(id);
+        if (this.waiting.has(id)) {
+          this.waiting.delete(id);
           reject(new Error('embed timed out'));
         }
       }, 120_000);
     });
   }
 
-  async _embedCloud(texts) {
+  private async embedCloud(texts: string[]): Promise<Float32Array[]> {
     const spec = CLOUD[this.provider];
     if (!this.apiKey) throw new Error('no API key set for the cloud embedder');
 
@@ -207,11 +251,10 @@ class Embedder extends EventEmitter {
       const body = await res.text().catch(() => '');
       throw new Error(`${this.provider} embeddings failed (${res.status}): ${body.slice(0, 200)}`);
     }
-    const vectors = spec.parse(await res.json());
-    return vectors.map(normalize);
+    return spec.parse(await res.json()).map(normalize);
   }
 
-  stop() {
+  stop(): void {
     this.status = 'stopped';
     if (this.child) {
       this.child.kill();
@@ -220,7 +263,7 @@ class Embedder extends EventEmitter {
     this.ready = false;
   }
 
-  state() {
+  state(): EmbedderState {
     return {
       backend: this.backend,
       provider: this.provider,
@@ -229,10 +272,8 @@ class Embedder extends EventEmitter {
       status: this.status,
       progress: this.progress,
       dim: this.dim || this.expectedDim(),
-      model: this.modelId || this.currentModel(),
+      model: this.modelId ?? this.currentModel(),
       error: this.lastError,
     };
   }
 }
-
-module.exports = { Embedder, LOCAL_MODEL, CLOUD };
