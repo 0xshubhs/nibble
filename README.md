@@ -307,6 +307,11 @@ in common. Satoshi is bundled in `assets/fonts/` rather than fetched from a CDN:
 an app that promises nothing leaves the device should not open a connection to
 someone else's server to draw its own text.
 
+## What is left
+
+[TODO.md](TODO.md): the unbuilt capture sources, the settings that exist
+as an API but not as UI, and what has to happen before a release.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
