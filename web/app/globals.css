@@ -599,9 +599,13 @@ kbd {
   display: grid;
   gap: 0;
   grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+  /* Each cell draws its own right and bottom edge and the container draws
+     the top and left, so the lines stay exactly 2px however many columns
+     the grid wraps to -- rather than doubling up at the right edge when it
+     falls to one. */
   border: var(--line) solid var(--ink);
-  border-radius: var(--radius-card);
-  overflow: hidden;
+  border-right: 0;
+  border-bottom: 0;
   background: var(--surface);
 }
 .ui-cell {

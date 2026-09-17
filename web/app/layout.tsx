@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import localFont from 'next/font/local';
+import { ORIGIN } from '@/lib/site';
 import { Nav } from '@/components/Nav';
 import { Footer } from '@/components/Footer';
 import './globals.css';
@@ -23,6 +24,10 @@ const description =
   'No account, no server, nothing uploaded.';
 
 export const metadata: Metadata = {
+  // Without this, Open Graph and canonical URLs stay relative and most
+  // scrapers drop them.
+  metadataBase: new URL(ORIGIN),
+  alternates: { canonical: '/' },
   title: {
     default: 'Nibble — an on-device memory your LLM can search',
     template: '%s — Nibble',

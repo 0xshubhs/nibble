@@ -1,5 +1,15 @@
 /** Everything the pages agree on: links, version, and the shape of the docs. */
 
+/**
+ * Where the site is served from. GitHub Pages puts a project site under
+ * /<repo>, so the two halves are separate: the workflow sets the base path
+ * from the repository name, and the origin can be overridden for a custom
+ * domain without touching anything else.
+ */
+export const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
+export const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL ?? 'https://0xshubhs.github.io';
+export const ORIGIN = `${SITE_URL}${BASE_PATH}`;
+
 export const REPO = 'https://github.com/0xshubhs/nibble';
 export const RELEASES = `${REPO}/releases`;
 export const LATEST = `${REPO}/releases/latest`;

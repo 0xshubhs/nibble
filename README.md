@@ -137,7 +137,7 @@ too.
 **Claude Code / Claude Desktop**: spawn the stdio relay.
 
 ```
-claude mcp add nibble -- node /path/to/src/mcp/stdio.js
+claude mcp add nibble -- node /path/to/nibble/out/mcp/stdio.js
 ```
 
 The app shows the exact path. The relay is dependency-free on purpose: a client
@@ -266,10 +266,10 @@ To sign, add these repository secrets and drop the
 ## Renaming it
 
 The product name appears in `package.json` (`productName`), `electron-builder.yml`
-(`productName`, `appId`), `src/main/index.js` (`setAppUserModelId`),
-`src/mcp/stdio.js` (`APP_DIR_NAME`, which locates the config) and the copy in
-`site/index.html`. The data folder name is the `FOLDER` constant in
-`src/main/paths.js`.
+(`productName`, `appId`), `src/main/index.ts` (`setAppUserModelId`),
+`src/mcp/stdio.ts` (`APP_DIR_NAME`, which locates the config) and the copy in
+`web/` and `site/index.html`. The data folder name is the `FOLDER` constant in
+`src/main/paths.ts`.
 
 ## The website
 
