@@ -165,12 +165,12 @@ function showWindow(focusId?: string): void {
 
 /**
  * Absolute path to the stdio relay, which is what a client actually spawns.
- * In a packaged app it lives beside the archive rather than inside it, because
- * a plain `node` cannot read files out of an asar.
+ * A packaged build ships it as a plain resource rather than inside the asar,
+ * because a bare `node` cannot read files out of an archive.
  */
 function relayPath(): string {
-  const p = path.join(__dirname, '..', 'mcp', 'stdio.js');
-  return app.isPackaged ? p.replace(`app.asar${path.sep}`, `app.asar.unpacked${path.sep}`) : p;
+  if (app.isPackaged) return path.join(process.resourcesPath, 'mcp', 'stdio.js');
+  return path.join(__dirname, '..', 'mcp', 'stdio.js');
 }
 
 function snapshot(): Snapshot {

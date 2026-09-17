@@ -6,37 +6,42 @@ directories:
   output: dist
   buildResources: build
 
-# Ad-hoc signs unsigned macOS builds, which otherwise will not launch at all
-# on Apple silicon. Steps aside when a real Developer ID is configured.
-afterPack: scripts/adhoc-sign.js
+# Prunes the other platforms' native binaries, then ad-hoc signs unsigned
+# macOS builds, which otherwise will not launch at all on Apple silicon.
+afterPack: scripts/after-pack.js
 
 files:
   - out/**/*
   - assets/**/*
   - package.json
   - "!**/*.map"
-  # onnxruntime ships ~289MB of prebuilt binaries for every platform at once.
-  # Each build keeps only its own; the per-platform excludes are below.
-  - "!node_modules/onnxruntime-node/bin/napi-v6/*/*/!(*.node|*.dll|*.so|*.dylib)"
+  # Shipped through extraResources instead, see below.
+  - "!out/mcp/**"
+  # onnxruntime ships ~289MB of prebuilts for every platform at once. The
+  # afterPack hook drops the ones this build does not need; it cannot be done
+  # here, because a platform-level `files` list replaces this one rather than
+  # extending it, and would silently drop the exclusions above.
 
 asar: true
 # The ONNX binaries have to exist as real files for dlopen; they cannot be
 # loaded from inside the archive.
 asarUnpack:
   - "node_modules/onnxruntime-node/bin/**"
-  # The stdio relay is spawned by a plain `node` outside Electron, which
-  # cannot read from inside the archive. It has no dependencies, so this
-  # single file is all that needs unpacking.
-  - "out/mcp/stdio.js"
+
+# The stdio relay is spawned by a plain `node` outside Electron, which cannot
+# read from inside the archive. It ships as a plain resource rather than via
+# asarUnpack: unpacking a single file gets hard-linked once per target/arch
+# combination, and the second link fails with EEXIST on macOS and Linux.
+# It has no dependencies, so one file is all that has to travel.
+extraResources:
+  - from: out/mcp/stdio.js
+    to: mcp/stdio.js
 compression: maximum
 
 # ---------------- macOS ----------------
 mac:
   category: public.app-category.productivity
   icon: build/icon.png
-  files:
-    - "!node_modules/onnxruntime-node/bin/napi-v6/win32/**"
-    - "!node_modules/onnxruntime-node/bin/napi-v6/linux/**"
   target:
     - target: dmg
       arch: [arm64, x64]
@@ -81,9 +86,6 @@ dmg:
 # ---------------- Windows ----------------
 win:
   icon: build/icon.png
-  files:
-    - "!node_modules/onnxruntime-node/bin/napi-v6/darwin/**"
-    - "!node_modules/onnxruntime-node/bin/napi-v6/linux/**"
   target:
     # `portable` is a single self-extracting .exe -- no install, no registry.
     - target: portable
@@ -109,11 +111,8 @@ nsis:
 # ---------------- Linux ----------------
 linux:
   icon: build/icon.png
-  files:
-    - "!node_modules/onnxruntime-node/bin/napi-v6/darwin/**"
-    - "!node_modules/onnxruntime-node/bin/napi-v6/win32/**"
   category: Utility
-  synopsis: Portable background reminders with native notifications
+  synopsis: An on-device memory your LLM can search, plus reminders
   target:
     # AppImage is the portable one: chmod +x and run, anywhere.
     - target: AppImage
