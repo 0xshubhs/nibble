@@ -27,7 +27,8 @@
     "build": "npm run build:ts && electron-builder",
     "build:mac": "npm run build:ts && electron-builder --mac",
     "build:win": "npm run build:ts && electron-builder --win",
-    "build:linux": "npm run build:ts && electron-builder --linux"
+    "build:linux": "npm run build:ts && electron-builder --linux",
+    "shots": "npm run build:ts && node scripts/ui-shots.js"
   },
   "devDependencies": {
     "@types/node": "^22.20.3",

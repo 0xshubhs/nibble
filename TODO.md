@@ -10,10 +10,11 @@ doing.
       `workflow_dispatch` only on purpose: running it is what makes the page
       public. Add a `push:` trigger to `.github/workflows/pages.yml` once you
       want every commit to deploy.
-- [ ] **Look at the app on a real screen.** Everything since the redesign was
-      verified by typecheck, tests and static output; the window was last seen
-      rendering in dark mode on Linux. Light mode, macOS and Windows are
-      unchecked.
+- [ ] **Look at the app on a real screen.** Both windows now render correctly
+      in every state through `npm run shots`, which draws them in a headless
+      Chromium against realistic data. What that cannot tell you is how they
+      look in the actual OS chrome: light mode, the macOS traffic lights and
+      the hidden-inset title bar, and Windows.
 - [ ] **Check the notch panel on a Mac.** It is macOS-only, so nothing about
       it has been run since the restyle: `npm start` with the panel switched on
       in Settings, or `npx electron . --dev --notch-open`.
@@ -118,9 +119,11 @@ capturing. That is honest, but they are still holes in the product.
         `--ozone-platform=x11` and `--ozone-platform=wayland` all hang the
         same way, on a Wayland session with XWayland present.
 
-      So everything that does not need a window is verified; nothing that
-      draws is. Start with the sandbox, which is a real misconfiguration
-      either way:
+      The UI is testable regardless -- `npm run shots` renders both windows
+      in a headless Chromium -- so this only blocks seeing the real app in
+      real OS chrome. Start with the sandbox, which is a real
+      misconfiguration either way, and needs a password this session does not
+      have:
 
       ```
       sudo chown root:root node_modules/electron/dist/chrome-sandbox

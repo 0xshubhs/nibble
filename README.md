@@ -305,6 +305,22 @@ checking a change without a screen grab picking up whatever else is in front:
 npx electron . --dev --screenshot=out.png --tab=memory --query="release process"
 ```
 
+`npm run shots` does the same job without launching anything. The renderer is
+plain HTML, CSS and one compiled script, and the only thing it needs from
+Electron is `window.api`; stub that and the pages run in any Chromium. It
+writes both windows, in every state worth looking at, into `out/shots`:
+
+```
+out/shots/window-reminders.png    window-memory.png    window-settings.png
+out/shots/notch-collapsed.png     notch-island.png     notch-expanded.png
+```
+
+Two reasons to prefer it. It draws the UI against interesting data rather
+than the empty state a fresh profile gives you, so a full reminder list, a
+search with its nearest neighbours open, and every capture source running are
+all one command away. And it works on a machine where Electron cannot open a
+window at all, which is worth having the day that happens.
+
 ## Signing
 
 Builds are unsigned by default, so macOS shows an "unidentified developer"
