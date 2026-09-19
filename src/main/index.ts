@@ -534,6 +534,8 @@ function registerIpc(): void {
     return notch?.isOpen ?? false;
   });
 
+  ipcMain.handle('notch:collapse', () => notch?.collapse());
+
   ipcMain.handle('app:show-window', () => showWindow());
 
   ipcMain.handle('memory:remember-files', async (_e, paths: string[]) => {

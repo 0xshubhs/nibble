@@ -44,6 +44,7 @@ const api: RendererApi = {
 
   // --- notch panel ---
   setNotch: (enabled) => ipcRenderer.invoke('notch:set', enabled),
+  closeNotch: () => ipcRenderer.invoke('notch:collapse'),
   // Not an IPC call: webUtils resolves the path synchronously in the preload,
   // which is the only place with the privilege to do it.
   pathForFile: (file) => webUtils.getPathForFile(file),

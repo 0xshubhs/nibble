@@ -1,6 +1,6 @@
 import path from 'path';
 import { execFileSync } from 'child_process';
-import { app, BrowserWindow, screen } from 'electron';
+import { app, BrowserWindow, powerMonitor, screen } from 'electron';
 import type { Display } from 'electron';
 import type { Settings } from '../types';
 
@@ -30,9 +30,35 @@ import type { Settings } from '../types';
 const COLLAPSED_H = 40;
 const EXPANDED_W = 460;
 const EXPANDED_H = 300;
-const POLL_MS = 120;
-/** Once open, the cursor can stray this far outside before it closes. */
+
+/**
+ * Two poll rates, because the two jobs are not the same job.
+ *
+ * Closed, this is only asking "did the cursor arrive", and a tenth of a
+ * second of lag before an animation starts is imperceptible. Open, it is
+ * deciding when to take the panel away from under the user's cursor, and
+ * being slow there feels like the panel is sticking to them.
+ */
+const POLL_IDLE_MS = 140;
+const POLL_OPEN_MS = 50;
+
+/**
+ * Crossing the notch on the way to the menu bar should not open anything, so
+ * the cursor has to stay put briefly first; leaving should not snatch the
+ * panel away on a wobble, so it lingers.
+ */
+const HOVER_DELAY_MS = 120;
+const LEAVE_DELAY_MS = 300;
+
+/** Once open, the cursor can stray this far outside before it counts as left. */
 const LEAVE_MARGIN = 24;
+
+/**
+ * A menu bar is never really shorter than this. The reported height comes
+ * from the work area, which is briefly wrong right after a resolution change
+ * or a wake, and a zero here would put the panel's body over the menu bar.
+ */
+const MIN_MENUBAR_H = 24;
 
 /**
  * Whether this Mac probably has a notch.
@@ -77,6 +103,8 @@ export class NotchPanel {
   private timer: NodeJS.Timeout | null = null;
   private expanded = false;
   private display: Display | null = null;
+  /** Pending open or close, held while the cursor proves it meant it. */
+  private intent: NodeJS.Timeout | null = null;
 
   constructor(private readonly deps: NotchDeps) {}
 
@@ -116,6 +144,10 @@ export class NotchPanel {
       // pull the user out of whatever they were doing.
       type: 'panel',
       acceptFirstMouse: true,
+      // Collapsed, the panel is scenery: it must not be able to take the
+      // keyboard from whatever the user is typing in. It becomes focusable
+      // only while it is open, which is the only time it has a text field.
+      focusable: false,
       show: false,
       webPreferences: {
         preload: this.deps.preload,
@@ -147,8 +179,12 @@ export class NotchPanel {
     screen.on('display-metrics-changed', this.reposition);
     screen.on('display-added', this.reposition);
     screen.on('display-removed', this.reposition);
+    // Waking is the other way the geometry goes stale, and it does not always
+    // come with a display event.
+    powerMonitor.on('resume', this.reposition);
+    powerMonitor.on('unlock-screen', this.reposition);
 
-    this.timer = setInterval(() => this.poll(), POLL_MS);
+    this.arm(POLL_IDLE_MS);
 
     // Development helper: hovering the notch cannot be scripted, so this opens
     // the panel on launch and holds it open for a look.
@@ -194,6 +230,38 @@ export class NotchPanel {
     };
   }
 
+  /** (Re)starts the cursor poll at the rate the current state wants. */
+  private arm(every: number): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = setInterval(() => this.poll(), every);
+  }
+
+  /**
+   * Schedules a state change the cursor has to hold still for.
+   *
+   * Both directions are deliberate. Without the open delay, every trip to the
+   * menu bar flings the panel out; without the close delay, a hand that
+   * wobbles on the way to a button loses the panel mid-reach. Anything that
+   * contradicts a pending change cancels it, so a cursor that passes straight
+   * through leaves no trace.
+   */
+  private intend(on: boolean, delay: number): void {
+    if (this.expanded === on) {
+      this.cancelIntent();
+      return;
+    }
+    if (this.intent) return; // already waiting for exactly this
+    this.intent = setTimeout(() => {
+      this.intent = null;
+      this.setExpanded(on);
+    }, delay);
+  }
+
+  private cancelIntent(): void {
+    if (this.intent) clearTimeout(this.intent);
+    this.intent = null;
+  }
+
   private poll(): void {
     if (!this.isOpen) return;
     const p = screen.getCursorScreenPoint();
@@ -203,7 +271,8 @@ export class NotchPanel {
       if (!zone) return;
       const inside =
         p.x >= zone.x && p.x <= zone.x + zone.width && p.y >= zone.y && p.y <= zone.y + zone.height;
-      if (inside) this.setExpanded(true);
+      if (inside) this.intend(true, HOVER_DELAY_MS);
+      else this.cancelIntent();
       return;
     }
 
@@ -214,16 +283,22 @@ export class NotchPanel {
       p.y < b.y - LEAVE_MARGIN ||
       p.y > b.y + b.height + LEAVE_MARGIN;
     // Keep it open while the user is typing in it.
-    if (outside && !this.win!.isFocused()) this.setExpanded(false);
+    if (outside && !this.win!.isFocused()) this.intend(false, LEAVE_DELAY_MS);
+    else this.cancelIntent();
   }
 
   private setExpanded(on: boolean): void {
     if (this.expanded === on || !this.isOpen) return;
     this.expanded = on;
-    // Collapsed, the panel must not eat clicks meant for the menu bar.
+    this.cancelIntent();
+    // Collapsed, the panel must not eat clicks meant for the menu bar, and
+    // must not be able to take the keyboard either.
     this.win!.setIgnoreMouseEvents(!on, { forward: true });
+    this.win!.setFocusable(on);
     this.win!.webContents.send('notch:expanded', on);
     if (!on) this.win!.blur();
+    // Track the cursor closely while it is open, idle along while it is not.
+    this.arm(on ? POLL_OPEN_MS : POLL_IDLE_MS);
   }
 
   /**
@@ -234,15 +309,32 @@ export class NotchPanel {
   private sendGeometry(): void {
     if (!this.isOpen || !this.display) return;
     this.win!.webContents.send('notch:geometry', {
-      menuBarHeight: this.display.workArea.y - this.display.bounds.y,
+      menuBarHeight: Math.max(
+        MIN_MENUBAR_H,
+        this.display.workArea.y - this.display.bounds.y
+      ),
       notchWidth: Math.max(80, this.deps.settings().notchWidth || 200),
     });
   }
 
-  /** Pushes whatever the panel should be showing. */
+  /** Closes the panel from the inside: Escape, or its own close button. */
+  collapse(): void {
+    this.setExpanded(false);
+  }
+
+  /**
+   * Pushes whatever the panel should be showing.
+   *
+   * The channel is the same `state` the main window listens on, because the
+   * payload is the same snapshot and the preload exposes exactly one
+   * subscription for it. Sending this on a channel of its own is what it used
+   * to do, and nothing was listening: the panel painted once at startup and
+   * then showed a stale next-reminder and pause state for the rest of the
+   * session.
+   */
   send(payload?: unknown): void {
     if (!this.isOpen) return;
-    this.win!.webContents.send('notch:state', payload ?? null);
+    this.win!.webContents.send('state', payload ?? null);
   }
 
   /** A brief visual pulse, for when something is captured. */
@@ -254,9 +346,12 @@ export class NotchPanel {
   stop(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    this.cancelIntent();
     screen.off('display-metrics-changed', this.reposition);
     screen.off('display-added', this.reposition);
     screen.off('display-removed', this.reposition);
+    powerMonitor.off('resume', this.reposition);
+    powerMonitor.off('unlock-screen', this.reposition);
     this.expanded = false;
     if (this.isOpen) this.win!.destroy();
     this.win = null;

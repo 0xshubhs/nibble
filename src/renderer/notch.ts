@@ -159,8 +159,13 @@ function bindNotch(): void {
     debounce = setTimeout(() => void runNotchSearch(), 170);
   });
 
-  el('q').addEventListener('keydown', (e) => {
-    if ((e as KeyboardEvent).key === 'Escape') setExpanded(false);
+  // Escape anywhere in the panel, not only while the search box has focus.
+  // Hiding the body is not enough on its own: until the main process knows,
+  // the window goes on swallowing clicks meant for whatever is underneath.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    setExpanded(false);
+    void window.api.closeNotch();
   });
 
   el('pause').addEventListener('click', () => {

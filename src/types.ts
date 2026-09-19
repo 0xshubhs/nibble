@@ -372,6 +372,12 @@ export interface RendererApi {
   regenerateMcpToken(): Promise<McpInfo>;
 
   setNotch(enabled: boolean): Promise<boolean>;
+  /**
+   * The notch panel asking to be collapsed, from Escape or a click on its own
+   * close affordance. It has to go through the main process: the renderer can
+   * hide its own body, but only main can stop the window swallowing clicks.
+   */
+  closeNotch(): Promise<void>;
 
   /**
    * A sandboxed renderer gets no usable path off a dropped File, so the
