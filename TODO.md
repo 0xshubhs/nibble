@@ -107,10 +107,20 @@ capturing. That is honest, but they are still holes in the product.
 
 ## Known environment issue
 
-- [ ] **Electron would not launch on this machine at the end of the session.**
-      First `chrome-sandbox` was reported as not configured, then it hung even
-      with `--no-sandbox`. It ran fine earlier the same day, so it is the
-      environment rather than the code. The usual fix:
+- [ ] **Electron cannot open a window on this machine.** Narrowed down, and
+      it is the environment rather than the code:
+
+      - `electron --version` works, but only with `--no-sandbox`. Without it,
+        `chrome-sandbox` is rejected for not being setuid root.
+      - `app.whenReady()` resolves fine headless -- the global hotkey and the
+        media source were both tested against the real OS through it.
+      - `new BrowserWindow(...)` hangs indefinitely. `--disable-gpu`,
+        `--ozone-platform=x11` and `--ozone-platform=wayland` all hang the
+        same way, on a Wayland session with XWayland present.
+
+      So everything that does not need a window is verified; nothing that
+      draws is. Start with the sandbox, which is a real misconfiguration
+      either way:
 
       ```
       sudo chown root:root node_modules/electron/dist/chrome-sandbox
