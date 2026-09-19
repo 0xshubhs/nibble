@@ -20,7 +20,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "npm run build:ts && electron .",
     "dev": "npm run build:ts && electron . --dev",
-    "test": "npm run build:ts && node out/test/store.test.js",
+    "test": "npm run build:ts && node out/test/store.test.js && node out/test/media.test.js",
     "icons": "node scripts/make-icons.js",
     "clean": "rm -rf out dist",
     "pack": "npm run build:ts && electron-builder --dir",

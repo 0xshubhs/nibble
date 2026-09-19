@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 
 import clipboard from './clipboard';
 import files from './files';
+import media from './media';
 import audio from './audio';
 import screen from './screen';
 
@@ -28,7 +29,7 @@ import type {
  * that they are not capturing.
  */
 
-export const SOURCES: CaptureSource[] = [clipboard, files, audio, screen];
+export const SOURCES: CaptureSource[] = [clipboard, files, media, audio, screen];
 
 export interface CaptureDeps {
   memory: Memory;

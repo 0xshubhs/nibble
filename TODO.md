@@ -57,6 +57,18 @@ capturing. That is honest, but they are still holes in the product.
       that cannot be missed, because Windows and Linux do not gate screen
       capture behind any OS permission at all.
 
+## Now playing, the rest of it
+
+- [ ] **Windows.** `GlobalSystemMediaTransportControlsSessionManager` is the
+      right API and needs either a native module or a WinRT round trip through
+      PowerShell. The source reports honestly in the meantime.
+- [ ] **Browsers on macOS.** Only Spotify and Music are readable today. The
+      options are both bad: a private framework, or automation access to the
+      whole browser. Worth revisiting if a sanctioned API appears.
+- [ ] **Show it in the notch.** The panel is the natural place for what is
+      playing right now, which is the one piece of state that is interesting
+      before you have asked anything.
+
 ## Quality
 
 - [ ] **Test the scheduler.** It is the riskiest untested code in the repo:

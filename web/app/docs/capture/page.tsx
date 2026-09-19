@@ -35,6 +35,11 @@ export default function Page() {
             'A global hotkey that stores the clipboard once, deliberately, with nothing watching in between.',
           ],
           [
+            <strong key="n">Now playing</strong>,
+            <span className="pill pill-solid" key="ns">live</span>,
+            'What you listen to and watch, with the title, the artist and the link. Any MPRIS player on Linux, browser tabs included; Spotify and Music on macOS.',
+          ],
+          [
             <strong key="a">Meetings &amp; audio</strong>,
             <span className="pill pill-quiet" key="as">phase 2</span>,
             'Permission handling is real; capture is not wired up yet.',
@@ -88,6 +93,35 @@ export default function Page() {
         files, skips anything over 2 MB, skips anything with a null byte in it, and re-reads a
         file when it changes. Node modules and dot directories are not walked.
       </p>
+
+      <h2 id="media">Now playing</h2>
+      <p>
+        The question this answers is the one nothing else can: what was that track, or that
+        video, that was on while I was working on the thing I now want to find again. Media is
+        a good index into a day precisely because it is incidental &mdash; you never wrote it
+        down, and you would never have thought to.
+      </p>
+      <ul>
+        <li>
+          <strong>Linux.</strong> MPRIS over D-Bus, which every serious player speaks, browsers
+          included. A YouTube tab arrives with the video title and the channel as the artist.
+        </li>
+        <li>
+          <strong>macOS.</strong> Spotify and Music, over AppleScript. macOS asks once for
+          permission to talk to them. Browsers cannot be read: system-wide Now Playing is a
+          private framework, and reading tabs instead would mean asking for automation access
+          to the whole browser.
+        </li>
+        <li>
+          <strong>Windows.</strong> Not wired up. The API exists and reaching it needs a native
+          module or a WinRT round trip, so the source says so rather than pretending.
+        </li>
+      </ul>
+      <Callout title="Only once it has really been playing">
+        Nothing is stored until a track has been playing for thirty seconds, so skipping
+        through a playlist leaves nothing behind. Paused is not playing either: something left
+        paused all afternoon never reaches your memory.
+      </Callout>
 
       <h2 id="hotkey">Quick capture</h2>
       <p>

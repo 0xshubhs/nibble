@@ -36,6 +36,7 @@ three natively and attaches the results to a GitHub release when you push a tag.
 | **Memory** | Captures text, chunks it, embeds it on device, and searches it by keyword *and* meaning |
 | **Related** | Any result opens its nearest neighbours in meaning, with no query and no model call |
 | **Quick capture** | One global hotkey stores the clipboard on purpose, with nothing watching in between |
+| **Now playing** | Remembers what you listen to and watch, so a day is searchable by what was on |
 | **MCP connector** | Claude, ChatGPT or any MCP client can query that memory as a tool |
 | **Reminders** | Once, hourly, daily, weekdays, weekly, or a custom interval |
 | **Portable** | Data lives beside the executable, not in your profile |
@@ -105,6 +106,7 @@ you are already looking at.
 | **Clipboard** | live | Remembers what you copy. Drops anything matching a credential shape or a high-entropy blob before storing it |
 | **Folders** | live | Reads text and Markdown from folders you choose, and notices changes |
 | **Quick capture** | live | A global hotkey (`⌘⇧M` / `Ctrl+Shift+M`) that stores the clipboard once, deliberately |
+| **Now playing** | live | What you play, with the title, artist and link. MPRIS on Linux, including browser tabs; Spotify and Music on macOS |
 | **Meetings & audio** | phase 2 | Permission handling is real; capture is not wired up yet |
 | **Screen** | phase 3 | Same. The most invasive source, so it ships last and with the strictest treatment |
 
@@ -113,6 +115,32 @@ state. They say they are not capturing rather than implying that they are.
 
 There is a global **pause** that keeps sources running but stores nothing, and a
 **forget** on every result and every source.
+
+### Now playing
+
+The question this answers is the one nothing else can: what was that track,
+or that video, that was on while I was working on the thing I now want to
+find again. Media is a good index into a day precisely because it is
+incidental -- you never wrote it down, and you would never have thought to.
+
+On Linux it reads MPRIS over D-Bus, which every serious player speaks,
+browsers included, so a YouTube tab arrives with the video title and the
+channel as the artist. One `gdbus` call per player returns the playback state
+and the metadata together, so a poll is one short-lived process and no
+dependency: parsing GVariant by hand is cheaper than a native D-Bus binding
+per platform and architecture, which is the same trade the memory store made.
+
+On macOS it asks Spotify and Music over AppleScript. There is no supported
+way to read what a browser is playing -- system-wide Now Playing lives behind
+a private framework, and reading browser tabs instead means asking for
+automation access to the browser, which is a much bigger ask than this is
+worth. Windows has a real API for it (GlobalSystemMediaTransportControls) and
+reaching it needs a native module or a WinRT round trip through PowerShell,
+so it is not wired up and says so.
+
+Nothing is stored until something has been playing for thirty seconds, so
+skipping through a playlist leaves no trace, and paused is not playing:
+leaving something paused all afternoon does not put it in your memory.
 
 ### Quick capture
 

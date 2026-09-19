@@ -37,7 +37,7 @@ export interface ReminderInput {
 
 /* ---------------- settings ---------------- */
 
-export type CaptureSourceId = 'clipboard' | 'files' | 'audio' | 'screen';
+export type CaptureSourceId = 'clipboard' | 'files' | 'media' | 'audio' | 'screen';
 
 export type EmbedBackend = 'local' | 'cloud';
 export type EmbedProvider = 'gemini' | 'voyage';

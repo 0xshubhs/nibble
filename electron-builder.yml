@@ -68,6 +68,11 @@ mac:
     NSScreenCaptureUsageDescription: >-
       Reads text from your screen on this device so you can search it later.
       Frames are discarded after reading; nothing is uploaded.
+    # Without this string macOS terminates the app the first time it sends an
+    # AppleEvent, rather than returning an error from the call.
+    NSAppleEventsUsageDescription: >-
+      Asks Spotify and Music what is playing, so you can search for it later.
+      Nothing is uploaded, and nothing else is read.
 
 dmg:
   artifactName: ${productName}-${version}-${arch}.${ext}

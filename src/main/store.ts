@@ -15,7 +15,7 @@ export const DEFAULTS: StoreData = {
     snoozeMinutes: 10,
 
     // --- memory ---
-    captureSources: { clipboard: false, files: false, audio: false, screen: false },
+    captureSources: { clipboard: false, files: false, media: false, audio: false, screen: false },
     memoryFolders: [],
     capturePaused: false,
     allowModelDownload: true,
