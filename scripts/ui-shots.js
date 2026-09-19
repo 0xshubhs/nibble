@@ -162,10 +162,25 @@ const related = [
 
 /* ---------------- the harness ---------------- */
 
+const nowPlaying = {
+  title: 'Why Rank Fusion Works',
+  artist: 'Some Channel',
+  album: '',
+  url: 'https://www.youtube.com/watch?v=abc123',
+  app: 'Brave',
+};
+
 const nothing = '() => Promise.resolve(null)';
 const bridge = `<script>
+const SNAPSHOT = ${JSON.stringify(snapshot)};
+// ?playing=1 puts a track on the media source, the way the source itself
+// reports one: live, before anything has been captured.
+if (new URLSearchParams(location.search).get('playing')) {
+  SNAPSHOT.memory.sources.find((s) => s.id === 'media').state.nowPlaying =
+    ${JSON.stringify(nowPlaying)};
+}
 window.api = {
-  getState: () => Promise.resolve(${JSON.stringify(snapshot)}),
+  getState: () => Promise.resolve(SNAPSHOT),
   searchMemory: () => Promise.resolve(${JSON.stringify(results)}),
   recentMemory: () => Promise.resolve(${JSON.stringify(results)}),
   relatedMemory: () => Promise.resolve(${JSON.stringify(related)}),
@@ -269,7 +284,8 @@ const shots = [
   ['window-settings', windowPage, '?tab=settings', '900,820'],
   ['notch-collapsed', notchPage, '?ghost=1', '500,140'],
   ['notch-island', notchPage, '?pulsing=1', '500,140'],
-  ['notch-expanded', notchPage, '?expanded=1', '500,320'],
+  ['notch-playing', notchPage, '?playing=1', '500,140'],
+  ['notch-expanded', notchPage, '?expanded=1&playing=1', '500,320'],
 ];
 
 for (const [name, page, query, size] of shots) {

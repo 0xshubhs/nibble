@@ -1,5 +1,6 @@
 import type {
   CaptureSourceId,
+  NowPlaying,
   McpInfo,
   Reminder,
   RendererApi,
@@ -23,6 +24,7 @@ declare global {
   type AppHit = SearchHit;
   type AppSourceView = SourceView;
   type AppMcpInfo = McpInfo;
+  type AppNowPlaying = NowPlaying;
   type AppSourceId = CaptureSourceId;
 }
 

@@ -68,10 +68,12 @@ export default function Page() {
           <strong>Closed</strong> &mdash; the size of the notch, and invisible.
         </li>
         <li>
-          <strong>Island</strong> &mdash; the notch plus a wing either side, which is the only
-          thing the closed strip ever says: that something was just remembered. It grows
-          sideways on the notch&apos;s own line, so it never covers anything that was not
-          already the notch.
+          <strong>Island</strong> &mdash; the notch plus a wing either side, grown sideways on
+          the notch&apos;s own line so it never covers anything that was not already the
+          notch. Two things can claim it: a capture that just happened, and whatever is
+          playing. The capture always wins while it is up, because it is news and it is gone
+          in two seconds; the track sits underneath, so the strip returns to it rather than to
+          nothing. A track gets a wider wing than a two-word confirmation does.
         </li>
         <li>
           <strong>Open</strong> &mdash; the full panel.

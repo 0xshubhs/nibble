@@ -66,9 +66,6 @@ capturing. That is honest, but they are still holes in the product.
 - [ ] **Browsers on macOS.** Only Spotify and Music are readable today. The
       options are both bad: a private framework, or automation access to the
       whole browser. Worth revisiting if a sanctioned API appears.
-- [ ] **Show it in the notch.** The panel is the natural place for what is
-      playing right now, which is the one piece of state that is interesting
-      before you have asked anything.
 
 ## Quality
 

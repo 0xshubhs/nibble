@@ -102,6 +102,9 @@ export class CaptureManager extends EventEmitter<CaptureEvents> {
         this.log.length = Math.min(this.log.length, 100);
         this.emit('log', msg);
       },
+      changed: (): void => {
+        this.emit('changed');
+      },
     };
   }
 

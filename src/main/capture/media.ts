@@ -1,6 +1,11 @@
 import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
-import type { CaptureSource, SourceAvailability, SourceInstance } from '../../types';
+import type {
+  CaptureSource,
+  NowPlaying,
+  SourceAvailability,
+  SourceInstance,
+} from '../../types';
 
 /**
  * Remembers what you were playing.
@@ -37,15 +42,6 @@ const run = promisify(execFile);
 const POLL_MS = 8_000;
 const MIN_PLAY_MS = 30_000;
 const CALL_TIMEOUT_MS = 2_000;
-
-export interface NowPlaying {
-  title: string;
-  artist: string;
-  album: string;
-  url: string;
-  /** The player it came from, e.g. Spotify or Brave. */
-  app: string;
-}
 
 /* ============================================================
    GVariant, read by hand
@@ -232,6 +228,11 @@ function keyOf(np: NowPlaying): string {
   return `${np.app}|${np.title}|${np.artist}`.toLowerCase();
 }
 
+/** The same, but tolerating nothing playing, for comparing two moments. */
+function keyOf2(np: NowPlaying | null): string {
+  return np ? keyOf(np) : '';
+}
+
 /**
  * What actually gets stored. Written as a sentence rather than as fields,
  * because it is going into a search index that is half semantic: "the video
@@ -314,6 +315,8 @@ const source: CaptureSource = {
     let skipped = 0;
     let busy = false;
     let complained = false;
+    /** What is playing right now, which the panel shows immediately. */
+    let current: NowPlaying | null = null;
 
     /** The track being watched, and whether it has played long enough yet. */
     let pending: { key: string; since: number } | null = null;
@@ -327,6 +330,14 @@ const source: CaptureSource = {
           busy = true;
           try {
             const np = await read();
+
+            // Report what is playing the moment it changes, whether or not
+            // it has been on long enough to be worth remembering.
+            if (keyOf2(current) !== keyOf2(np)) {
+              current = np;
+              ctx.changed?.();
+            }
+
             if (!np) {
               pending = null;
               return;
@@ -376,10 +387,11 @@ const source: CaptureSource = {
         if (timer) clearInterval(timer);
         timer = null;
         pending = null;
+        current = null;
       },
 
       state() {
-        return { running: timer !== null, captured, skipped };
+        return { running: timer !== null, captured, skipped, nowPlaying: current };
       },
     };
   },

@@ -122,6 +122,11 @@ export default function Page() {
         through a playlist leaves nothing behind. Paused is not playing either: something left
         paused all afternoon never reaches your memory.
       </Callout>
+      <p>
+        Showing what is playing is a different question from storing it, and happens
+        immediately: the <Link href="/docs/notch/">notch panel</Link> grows sideways to say
+        what is on, long before it has been playing long enough to be worth remembering.
+      </p>
 
       <h2 id="hotkey">Quick capture</h2>
       <p>

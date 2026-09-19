@@ -142,6 +142,13 @@ Nothing is stored until something has been playing for thirty seconds, so
 skipping through a playlist leaves no trace, and paused is not playing:
 leaving something paused all afternoon does not put it in your memory.
 
+What is playing shows in the notch panel straight away, though, which is a
+different question from whether it is worth remembering: the strip grows
+sideways and says what it is, and the open panel has a line for it. A
+capture always wins that space while it is on screen, because it is news and
+it is gone in two seconds; the track is underneath, so the strip returns to
+it rather than to nothing.
+
 ### Quick capture
 
 The clipboard source is ambient: while it runs, everything you copy is stored.

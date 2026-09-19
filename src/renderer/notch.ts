@@ -14,6 +14,16 @@ const el = <T extends HTMLElement = HTMLElement>(id: string): T =>
 let pulseTimer: ReturnType<typeof setTimeout> | null = null;
 let searchSeq = 0;
 
+/**
+ * The two things the closed strip can say, in priority order.
+ *
+ * A capture is transient and always wins: it is news, and it is gone in two
+ * seconds. What is playing is ambient and sits underneath, so the strip
+ * returns to it rather than to nothing.
+ */
+let pulseLabel: string | null = null;
+let playing: AppNowPlaying | null = null;
+
 /* ============================================================
    the shape
 
@@ -29,8 +39,12 @@ let searchSeq = 0;
    up, so the morph costs a transition rather than a frame loop.
    ============================================================ */
 
-/** Width added either side of the notch when the strip has something to say. */
-const ISLAND_WING = 72;
+/**
+ * Width added either side of the notch when the strip has something to say.
+ * A track needs more room than a two-word confirmation does.
+ */
+const PULSE_WING = 72;
+const MEDIA_WING = 122;
 
 const RADII = {
   collapsed: { top: 7, bottom: 9 },
@@ -84,8 +98,9 @@ function applyShape(): void {
     shell.style.clipPath = `path('${notchPath(window.innerWidth, window.innerHeight, RADII.expanded.top, RADII.expanded.bottom)}')`;
     return;
   }
-  if (body.classList.contains('pulsing')) {
-    shell.style.clipPath = `path('${notchPath(geom.notchWidth + ISLAND_WING * 2, geom.menuBarHeight, RADII.island.top, RADII.island.bottom)}')`;
+  if (body.classList.contains('pulsing') || body.classList.contains('playing')) {
+    const wing = body.classList.contains('pulsing') ? PULSE_WING : MEDIA_WING;
+    shell.style.clipPath = `path('${notchPath(geom.notchWidth + wing * 2, geom.menuBarHeight, RADII.island.top, RADII.island.bottom)}')`;
     return;
   }
   shell.style.clipPath = `path('${notchPath(geom.notchWidth, geom.menuBarHeight, RADII.collapsed.top, RADII.collapsed.bottom)}')`;
@@ -106,6 +121,17 @@ function paint(state: AppSnapshot | null): void {
         minute: '2-digit',
       })}`
     : 'No reminders';
+
+  // Live, not stored: the media source reports this the moment a track
+  // starts, long before it has been playing long enough to be remembered.
+  const np = state.memory?.sources.find((s) => s.id === 'media')?.state.nowPlaying ?? null;
+  const changed = (playing ? trackLine(playing) : '') !== (np ? trackLine(np) : '');
+  playing = np;
+  if (changed) renderStrip();
+
+  const now = el('now');
+  now.hidden = !np;
+  now.textContent = np ? `♪ ${trackLine(np)}` : '';
 
   const paused = state.memory?.paused ?? false;
   const pause = el<HTMLButtonElement>('pause');
@@ -178,20 +204,35 @@ function setExpanded(on: boolean): void {
   }
 }
 
+/** What is playing, as one line. */
+function trackLine(np: AppNowPlaying): string {
+  return np.artist ? `${np.title} — ${np.artist}` : np.title;
+}
+
 /**
- * The one thing the closed strip ever says: that something was just
- * remembered. It grows sideways on the notch's own line rather than
- * downward, so it never covers anything that was not already the notch.
+ * The single place that decides what the closed strip shows, so the two
+ * things that can claim it cannot end up half-applied between them.
+ *
+ * It grows sideways on the notch's own line rather than downward, so it
+ * never covers anything that was not already the notch.
  */
-function pulse(label: string): void {
-  document.body.classList.add('pulsing');
-  el('lip-text').textContent = label;
+function renderStrip(): void {
+  const body = document.body;
+  body.classList.toggle('pulsing', pulseLabel !== null);
+  body.classList.toggle('playing', pulseLabel === null && playing !== null);
+
+  el('lip-text').textContent = pulseLabel ?? (playing ? trackLine(playing) : '');
   applyShape();
+}
+
+function pulse(label: string): void {
+  pulseLabel = label;
+  renderStrip();
   if (pulseTimer) clearTimeout(pulseTimer);
   pulseTimer = setTimeout(() => {
-    document.body.classList.remove('pulsing');
-    el('lip-text').textContent = '';
-    applyShape();
+    pulseLabel = null;
+    // Back to whatever was underneath, which is usually nothing.
+    renderStrip();
   }, 2200);
 }
 

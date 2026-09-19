@@ -56,7 +56,8 @@ html, body {
 
 /* Anything that makes the panel visible: open, or saying something. */
 body.expanded .shell,
-body.pulsing .shell { opacity: 1; }
+body.pulsing .shell,
+body.playing .shell { opacity: 1; }
 
 body.expanded .shell {
   transition:
@@ -102,8 +103,22 @@ body.expanded .shell {
   transition: opacity 300ms ease-out 180ms, max-width 300ms ease-out 180ms;
 }
 
-body.pulsing .dot { opacity: 1; }
+body.pulsing .dot,
+body.playing .dot { opacity: 1; }
 body.pulsing .strip-text { opacity: 1; max-width: 220px; }
+
+/* A track sits there for as long as it plays, so it gets more room than a
+   two-word confirmation, and it has to be able to be too long for it. */
+body.playing .strip-text {
+  opacity: 1;
+  max-width: 230px;
+  text-overflow: ellipsis;
+  font-weight: 500;
+}
+/* Breathing rather than blinking: it is saying that something is going on,
+   not asking to be looked at. */
+body.playing .dot { animation: breathe 2.6s ease-in-out infinite; }
+@keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
 /* Expanding cancels whatever the strip was saying, immediately. */
 body.expanded .dot,
@@ -211,6 +226,16 @@ input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
   text-align: center;
   color: #6e6e78;
   font-size: 12px;
+}
+
+/* What is playing, inside the open panel, where there is room for it. */
+.now {
+  margin: 10px 0 0;
+  font-size: 11.5px;
+  color: #9b9ba7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .foot {

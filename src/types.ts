@@ -205,6 +205,22 @@ export interface SourceAvailability {
 export interface CaptureContext {
   capture(item: CaptureItem): CaptureResult;
   log(message: string): void;
+  /**
+   * Says that `state()` would now answer differently, without anything
+   * having been captured. A source that only reported through capture could
+   * never show anything it had decided not to store.
+   */
+  changed?(): void;
+}
+
+/** What a player is playing right now, as the panel shows it. */
+export interface NowPlaying {
+  title: string;
+  artist: string;
+  album: string;
+  url: string;
+  /** The player it came from, e.g. Spotify or Brave. */
+  app: string;
 }
 
 export interface SourceInstanceState {
@@ -212,6 +228,13 @@ export interface SourceInstanceState {
   captured: number;
   skipped?: number;
   folders?: number;
+  /**
+   * Live, not stored. A source reports this when it knows something the UI
+   * should show before anything has been captured -- what is playing is
+   * interesting the moment it starts, not thirty seconds later when it is
+   * old enough to remember.
+   */
+  nowPlaying?: NowPlaying | null;
 }
 
 export interface SourceInstance {
