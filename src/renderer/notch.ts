@@ -14,6 +14,83 @@ const el = <T extends HTMLElement = HTMLElement>(id: string): T =>
 let pulseTimer: ReturnType<typeof setTimeout> | null = null;
 let searchSeq = 0;
 
+/* ============================================================
+   the shape
+
+   The panel is one silhouette clipped to a notch-shaped path: two
+   concave flares where it meets the top of the screen, two convex
+   corners at the bottom. Collapsed it is the size of the notch,
+   which is why it reads as the notch growing rather than as a
+   window appearing near it.
+
+   All three paths are the same sequence of commands with different
+   numbers in them, which is the whole trick: a browser will
+   interpolate one path into another only when their commands line
+   up, so the morph costs a transition rather than a frame loop.
+   ============================================================ */
+
+/** Width added either side of the notch when the strip has something to say. */
+const ISLAND_WING = 72;
+
+const RADII = {
+  collapsed: { top: 7, bottom: 9 },
+  island: { top: 9, bottom: 13 },
+  expanded: { top: 14, bottom: 28 },
+};
+
+let geom = { menuBarHeight: 32, notchWidth: 200 };
+
+/**
+ * A notch-shaped path `w` by `h`, centred in the window.
+ *
+ * The top corners start at the screen edge and curve inward to a point
+ * inset by the flare, with the control point on the top edge: that is what
+ * makes them concave, so the shape appears to hang from the edge rather
+ * than to sit below it. The bottom corners put the control point at the
+ * corner itself, which is an ordinary rounded corner.
+ *
+ * Both radii are clamped against the current size, not the target size,
+ * because early in the animation the shape is small enough for an unclamped
+ * curve to fold through itself. The flare is clamped against the height as
+ * well as the width: on a shape shorter than the flare is deep, the top
+ * curve would otherwise finish below where the bottom curve starts, and the
+ * side would run backwards.
+ */
+function notchPath(w: number, h: number, topR: number, bottomR: number): string {
+  const x = Math.round((window.innerWidth - w) / 2);
+  const t = Math.min(topR, w / 4, h / 2);
+  const b = Math.min(bottomR, h - t, (w - 2 * t) / 2);
+  const r = (n: number): string => n.toFixed(2);
+
+  return [
+    `M ${r(x)} 0`,
+    `Q ${r(x + t)} 0 ${r(x + t)} ${r(t)}`,
+    `L ${r(x + t)} ${r(h - b)}`,
+    `Q ${r(x + t)} ${r(h)} ${r(x + t + b)} ${r(h)}`,
+    `L ${r(x + w - t - b)} ${r(h)}`,
+    `Q ${r(x + w - t)} ${r(h)} ${r(x + w - t)} ${r(h - b)}`,
+    `L ${r(x + w - t)} ${r(t)}`,
+    `Q ${r(x + w - t)} 0 ${r(x + w)} 0`,
+    'Z',
+  ].join(' ');
+}
+
+/** Whichever of the three shapes the current state calls for. */
+function applyShape(): void {
+  const shell = el('shell');
+  const body = document.body;
+
+  if (body.classList.contains('expanded')) {
+    shell.style.clipPath = `path('${notchPath(window.innerWidth, window.innerHeight, RADII.expanded.top, RADII.expanded.bottom)}')`;
+    return;
+  }
+  if (body.classList.contains('pulsing')) {
+    shell.style.clipPath = `path('${notchPath(geom.notchWidth + ISLAND_WING * 2, geom.menuBarHeight, RADII.island.top, RADII.island.bottom)}')`;
+    return;
+  }
+  shell.style.clipPath = `path('${notchPath(geom.notchWidth, geom.menuBarHeight, RADII.collapsed.top, RADII.collapsed.bottom)}')`;
+}
+
 /* ---------------- state from the main process ---------------- */
 
 function paint(state: AppSnapshot | null): void {
@@ -90,6 +167,7 @@ async function runNotchSearch(): Promise<void> {
 
 function setExpanded(on: boolean): void {
   document.body.classList.toggle('expanded', on);
+  applyShape();
   if (on) {
     el('q').focus();
   } else {
@@ -100,13 +178,20 @@ function setExpanded(on: boolean): void {
   }
 }
 
+/**
+ * The one thing the closed strip ever says: that something was just
+ * remembered. It grows sideways on the notch's own line rather than
+ * downward, so it never covers anything that was not already the notch.
+ */
 function pulse(label: string): void {
   document.body.classList.add('pulsing');
   el('lip-text').textContent = label;
+  applyShape();
   if (pulseTimer) clearTimeout(pulseTimer);
   pulseTimer = setTimeout(() => {
     document.body.classList.remove('pulsing');
     el('lip-text').textContent = '';
+    applyShape();
   }, 2200);
 }
 
@@ -178,9 +263,11 @@ function bindNotch(): void {
   bindNotchDrop();
 
   window.api.onNotchGeometry((g) => {
+    geom = g;
     const root = document.documentElement;
     root.style.setProperty('--menubar-h', `${g.menuBarHeight}px`);
     root.style.setProperty('--notch-w', `${g.notchWidth}px`);
+    applyShape();
   });
   window.api.onNotchExpanded((on) => setExpanded(on));
   window.api.onNotchPulse((label) => pulse(label));
@@ -189,5 +276,9 @@ function bindNotch(): void {
 
 void (async function init(): Promise<void> {
   bindNotch();
+  // The shape has to exist before the first transition, or the panel's
+  // first open animates from no clip at all, which is a full-screen black
+  // rectangle collapsing into a notch.
+  applyShape();
   paint(await window.api.getState());
 })();

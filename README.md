@@ -208,6 +208,33 @@ At rest it paints nothing at all. Drawing a collapsed lip only looks right if
 it exactly covers the physical notch, and nothing can tell us how wide that is,
 so any guess would show as black wings on one machine and a gap on another.
 
+### How it moves
+
+The panel is one silhouette clipped to a notch-shaped path: two concave
+flares where it meets the top of the screen, two convex corners at the
+bottom. It grows out of the notch and shrinks back into it, rather than
+sliding into view from somewhere.
+
+Three shapes, built from the same sequence of path commands with different
+numbers in them. That is the whole trick: a browser interpolates one path
+into another only when their commands line up, so the morph costs a CSS
+transition instead of a frame loop.
+
+  closed    the size of the notch, and invisible
+  island    the notch plus a wing either side, when something was captured
+  open      the full panel
+
+The content inside is laid out at full size the whole time and is revealed by
+the shape, so opening never has to lay anything out: the only work per frame
+is a clip and a transform. Opening and closing are deliberately not the same
+motion -- 520ms with the barest overshoot on the way out, 400ms with none on
+the way back, because a panel that bounces as it leaves reads as a mistake.
+
+Opening and closing are also intentions rather than events. The cursor has to
+rest on the notch briefly before anything happens, and stray briefly before
+it closes, so crossing the notch on the way to the menu bar does not fling
+the panel out and a wobble on the way to a button does not lose it.
+
 Notch detection is a guess too, and the obvious signal does not work: a 14" M3
 reports a 29pt menu bar at one scaled resolution while an external 1080p
 display reports 30pt. It reads the model identifier instead, and the panel

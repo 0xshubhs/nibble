@@ -1,9 +1,17 @@
-/* The panel is drawn entirely in black so it merges with the notch. Only the
-   expanded body has any visible edge.
+/* ============================================================
+   The notch panel.
 
-   Its colours are literals rather than tokens: the panel hangs off a black
-   physical notch in both themes, so it must not invert when the rest of the
-   system does. The type, the radii and the shapes still come from tokens.css. */
+   One black silhouette, clipped to a notch-shaped path, which grows
+   out of the physical notch and shrinks back into it. The content
+   inside is laid out at full size the whole time and is revealed by
+   the shape rather than by moving: opening never lays anything out,
+   so the only work per frame is a clip and a transform.
+
+   Its colours are literals rather than tokens. The panel hangs off a
+   black physical notch in both themes and must not invert when the
+   rest of the system does. The type, the shapes and the spacing come
+   from tokens.css.
+   ============================================================ */
 
 * { box-sizing: border-box; }
 
@@ -22,75 +30,122 @@ html, body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* ------------------------------------------------------------
+   the silhouette
+
+   `clip-path` is set from the script, because the path depends on
+   the real menu bar height and the notch width, which only the main
+   process knows. The three paths it swaps between are built from the
+   same sequence of commands, which is what lets the browser
+   interpolate one into the next instead of cutting.
+   ------------------------------------------------------------ */
+
 .shell {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  /* Closing is the default; opening overrides it below. Collapsing is
+     quicker and has no overshoot in it, because a panel that bounces on
+     its way out reads as a mistake rather than as a flourish. */
+  transition:
+    clip-path 400ms cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 120ms ease-out;
+  will-change: clip-path, opacity;
 }
 
-/* The strip level with the menu bar.
- *
- * Collapsed it paints nothing at all. Drawing a black lip only looks right if
- * it exactly covers the physical notch, and nothing can tell us how wide that
- * is: macOS exposes it solely through NSScreen.safeAreaInsets. Any guess shows
- * up as black wings on one machine and a gap on another, so at rest the panel
- * is simply invisible and only the hover target exists.
- *
- * Its height is the real menu bar height, sent by the main process, so the
- * body opens flush beneath the menu bar rather than overlapping it.
- */
-.lip {
-  width: var(--notch-w, 200px);
+/* Anything that makes the panel visible: open, or saying something. */
+body.expanded .shell,
+body.pulsing .shell { opacity: 1; }
+
+body.expanded .shell {
+  transition:
+    clip-path 520ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 100ms ease-out;
+}
+
+/* ------------------------------------------------------------
+   the strip: the row level with the menu bar
+   ------------------------------------------------------------ */
+
+.strip {
+  position: relative;
   height: var(--menubar-h, 32px);
-  background: transparent;
-  border-radius: 0 0 var(--radius-input) var(--radius-input);
-  transition: width 0.22s cubic-bezier(0.22, 1, 0.36, 1), background 0.18s ease;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 7px;
+  /* Room for the flare, so a wing's text never sits under the curve. */
+  padding: 0 18px;
 }
-body.expanded .lip { width: 100%; border-radius: 0; background: #000; }
-/* A capture pulse is the one time the collapsed panel shows itself. */
-body.pulsing .lip { background: #000; }
 
 .dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #ffffff;
+  background: #fff;
   opacity: 0;
-  transition: opacity 0.2s ease;
+  transition: opacity 120ms ease-out;
 }
-.lip-text {
+
+.strip-text {
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.02em;
   color: #f5f5f7;
   opacity: 0;
   max-width: 0;
   overflow: hidden;
   white-space: nowrap;
-  transition: opacity 0.2s ease, max-width 0.22s ease;
+  /* In late, out fast: the island should settle before it says anything,
+     and get out of the way the instant it stops being true. */
+  transition: opacity 300ms ease-out 180ms, max-width 300ms ease-out 180ms;
 }
-body.pulsing .dot { opacity: 1; }
-body.pulsing .lip-text { opacity: 1; max-width: 150px; }
 
-/* The part that only exists when open. */
-.body {
-  width: 100%;
-  background: #000;
-  border-radius: 0 0 var(--radius-xl) var(--radius-xl);
-  border: 1px solid #1f1f22;
-  border-top: 0;
-  padding: 13px 14px;
+body.pulsing .dot { opacity: 1; }
+body.pulsing .strip-text { opacity: 1; max-width: 220px; }
+
+/* Expanding cancels whatever the strip was saying, immediately. */
+body.expanded .dot,
+body.expanded .strip-text {
   opacity: 0;
-  transform: translateY(-10px);
-  pointer-events: none;
-  transition: opacity 0.18s ease, transform 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  max-width: 0;
+  transition-duration: 120ms;
+  transition-delay: 0s;
 }
-body.expanded .body { opacity: 1; transform: none; pointer-events: auto; }
+
+/* ------------------------------------------------------------
+   the panel: everything below the menu bar line
+   ------------------------------------------------------------ */
+
+.panel {
+  padding: 4px 16px 14px;
+  opacity: 0;
+  /* Scaled from the top, so it appears to unfold out of the strip rather
+     than to arrive from somewhere else. Transform only: the layout is
+     final before the animation starts. */
+  transform: scale(0.94);
+  transform-origin: top center;
+  pointer-events: none;
+  transition:
+    opacity 180ms ease-out,
+    transform 400ms cubic-bezier(0.32, 0.72, 0, 1);
+  /* One composited layer, so opacity and scale do not have to be applied
+     to every child separately. */
+  will-change: transform, opacity;
+  contain: layout paint;
+}
+
+body.expanded .panel {
+  opacity: 1;
+  transform: none;
+  pointer-events: auto;
+  /* The reveal trails the shape slightly and is plainer than it: the
+     spring settles, the content simply arrives. */
+  transition:
+    opacity 300ms ease-out 30ms,
+    transform 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
 
 .row { display: flex; gap: 8px; }
 
@@ -100,17 +155,17 @@ input[type='search'] {
   font-weight: 500;
   color: #f5f5f7;
   background: #141416;
-  border: 1px solid #262629;
+  border: 1px solid #2a2a2e;
   border-radius: var(--radius-full);
   padding: 8px 14px;
   user-select: text;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 input[type='search']::placeholder { color: #6e6e78; }
 input[type='search']:focus {
   outline: none;
   border-color: #ffffff;
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.25);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.22);
 }
 input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
 
@@ -178,12 +233,15 @@ input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
   background: #1c1c1f;
   border: 1px solid transparent;
   border-radius: var(--radius-full);
-  padding: 5px 12px;
+  /* The hit target is bigger than the label: at this size an icon or a
+     word is never the thing you are actually aiming at. */
+  padding: 6px 13px;
   cursor: default;
-  transition: background 0.15s ease;
+  transition: background 140ms ease, opacity 120ms ease-out, transform 120ms ease-out;
 }
 .ghost:hover { background: #26262a; }
-.ghost.on { background: #ffffff; color: #000000; border-color: #ffffff; }
+.ghost:active { opacity: 0.75; transform: scale(0.97); }
+.ghost.on { background: #ffffff; color: #000000; }
 
 /* drag target */
 .drop {
@@ -201,5 +259,5 @@ input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
 body.dragging .drop { display: flex; }
 
 @media (prefers-reduced-motion: reduce) {
-  * { transition-duration: 0.001ms !important; }
+  * { transition-duration: 0.001ms !important; transition-delay: 0s !important; }
 }

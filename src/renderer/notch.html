@@ -11,15 +11,17 @@
     <link rel="stylesheet" href="notch.css" />
   </head>
   <body class="collapsed">
-    <!-- The shell is black so it reads as an extension of the physical notch
-         rather than a window sitting near it. -->
+    <!-- One silhouette, clipped to a notch-shaped path that grows.
+         Everything below is laid out at full size the whole time and simply
+         revealed by the shape, so opening never has to lay anything out. -->
     <div class="shell" id="shell">
-      <div class="lip" id="lip">
-        <span class="dot" id="dot"></span>
-        <span class="lip-text" id="lip-text"></span>
+      <!-- Level with the menu bar: the only row that exists while closed. -->
+      <div class="strip">
+        <span class="dot"></span>
+        <span class="strip-text" id="lip-text"></span>
       </div>
 
-      <div class="body" id="panel">
+      <div class="panel" id="panel">
         <div class="row">
           <input
             id="q"

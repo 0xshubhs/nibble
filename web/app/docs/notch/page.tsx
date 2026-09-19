@@ -51,6 +51,45 @@ export default function Page() {
         hover target exists.
       </Callout>
 
+      <h2 id="motion">How it moves</h2>
+      <p>
+        The panel is one silhouette clipped to a notch-shaped path: two concave flares where it
+        meets the top of the screen, two convex corners at the bottom. It grows out of the
+        notch and shrinks back into it, rather than sliding into view from somewhere else.
+      </p>
+      <p>
+        There are three shapes, and they are the same sequence of path commands with different
+        numbers in them. That is the whole trick: a browser will interpolate one path into
+        another only when their commands line up, so the morph costs a CSS transition rather
+        than a frame loop.
+      </p>
+      <ul>
+        <li>
+          <strong>Closed</strong> &mdash; the size of the notch, and invisible.
+        </li>
+        <li>
+          <strong>Island</strong> &mdash; the notch plus a wing either side, which is the only
+          thing the closed strip ever says: that something was just remembered. It grows
+          sideways on the notch&apos;s own line, so it never covers anything that was not
+          already the notch.
+        </li>
+        <li>
+          <strong>Open</strong> &mdash; the full panel.
+        </li>
+      </ul>
+      <p>
+        The content is laid out at full size the whole time and is revealed by the shape, so
+        opening never has to lay anything out: the only work per frame is a clip and a
+        transform. Opening and closing are deliberately not the same motion &mdash; 520ms with
+        the barest overshoot on the way out, 400ms with none on the way back, because a panel
+        that bounces as it leaves reads as a mistake rather than as a flourish.
+      </p>
+      <Callout title="Opening is an intention, not an event">
+        The cursor has to rest on the notch briefly before anything happens, and stray for a
+        moment before it closes. Without the first, every trip to the menu bar flings the panel
+        out; without the second, a hand that wobbles on the way to a button loses it mid-reach.
+      </Callout>
+
       <h2 id="detection">Detecting a notch is a guess too</h2>
       <p>
         The obvious signal does not work: a 14-inch M3 reports a 29 point menu bar at one scaled
