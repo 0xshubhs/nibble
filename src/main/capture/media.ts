@@ -1,5 +1,7 @@
 import { execFile, execFileSync } from 'child_process';
 import { promisify } from 'util';
+import path from 'path';
+import { bundleForAppName, bundleForPid, iconFor } from '../appicon';
 import type {
   CaptureSource,
   NowPlaying,
@@ -25,11 +27,15 @@ import type {
  *           video title and the channel as the artist, which is exactly what
  *           you want to be able to search for later.
  *
- *   macOS   AppleScript to Spotify and Music. There is no supported way to
- *           read what a browser is playing: the system-wide Now Playing
- *           information lives behind a private framework, and reading a
- *           browser's tabs instead means asking for automation access to the
- *           browser, which is a far bigger ask than this feature is worth.
+ *   macOS   AppleScript to Spotify and Music, and `pmset` for everything
+ *           else. The system-wide Now Playing information lives behind a
+ *           private framework and a browser's tabs need automation access to
+ *           that browser, so neither is on the table -- but an app playing
+ *           audio takes out a power assertion to stop the machine sleeping
+ *           under it, and `pmset -g assertions` lists those by pid. That
+ *           cannot say what a YouTube tab is playing, only that Firefox is
+ *           playing something, which is enough to show the source in the
+ *           notch and is not enough to write down.
  *
  * Windows has an API for exactly this (GlobalSystemMediaTransportControls),
  * and reaching it needs either a native module or a WinRT round trip through
@@ -205,14 +211,59 @@ const MAC_SCRIPT = [
   'return ""',
 ].join('\n');
 
+/**
+ * Whichever app is holding the "audio-playing" assertion.
+ *
+ * Only that assertion is read, deliberately. coreaudiod publishes its own
+ * entries naming the pid on each end of a stream, but they include things
+ * like the speech daemon holding an input open -- a machine sitting idle
+ * lists two of them. The `audio-playing` assertion is the one an app takes
+ * out because it is actually playing something to the user.
+ */
+const AUDIO_ASSERTION = /\bpid (\d+)\([^)]*\):.*?named:\s*"audio-playing"/;
+
+async function readMacAudioApp(): Promise<NowPlaying | null> {
+  const { stdout } = await run('pmset', ['-g', 'assertions'], {
+    timeout: CALL_TIMEOUT_MS,
+    encoding: 'utf8',
+  });
+
+  for (const line of stdout.split('\n')) {
+    const m = AUDIO_ASSERTION.exec(line);
+    if (!m) continue;
+    const bundle = await bundleForPid(Number(m[1]));
+    if (!bundle) continue;
+    return {
+      title: '',
+      artist: '',
+      album: '',
+      url: '',
+      app: path.basename(bundle, '.app'),
+      icon: await iconFor(bundle),
+    };
+  }
+  return null;
+}
+
 async function readMac(): Promise<NowPlaying | null> {
   const { stdout } = await run('osascript', ['-e', MAC_SCRIPT], {
     timeout: CALL_TIMEOUT_MS,
     encoding: 'utf8',
   });
   const [app, title, artist, album, url] = stdout.split('\n').map((l) => l.trim());
-  if (!app || !title) return null;
-  return { title, artist: artist ?? '', album: album ?? '', url: url ?? '', app };
+
+  // Nothing scriptable is playing, which does not mean nothing is.
+  if (!app || !title) return readMacAudioApp();
+
+  const bundle = bundleForAppName(app);
+  return {
+    title,
+    artist: artist ?? '',
+    album: album ?? '',
+    url: url ?? '',
+    app,
+    icon: bundle ? await iconFor(bundle) : '',
+  };
 }
 
 function read(): Promise<NowPlaying | null> {
@@ -305,7 +356,7 @@ const source: CaptureSource = {
     }
     return {
       ok: true,
-      note: 'Spotify and Music. macOS will ask once for permission to control them; browsers cannot be read without far broader access.',
+      note: 'Spotify and Music by name, and any other app -- browsers included -- as the source only. macOS will ask once for permission to control Spotify and Music.',
     };
   },
 
@@ -339,6 +390,15 @@ const source: CaptureSource = {
             }
 
             if (!np) {
+              pending = null;
+              return;
+            }
+
+            // An app-only reading: something is playing, but nothing that can
+            // be asked what. Worth showing in the notch, not worth writing
+            // down -- a memory that says only "Firefox played something" is
+            // not one anybody can search for.
+            if (!np.title) {
               pending = null;
               return;
             }

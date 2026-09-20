@@ -221,6 +221,12 @@ export interface NowPlaying {
   url: string;
   /** The player it came from, e.g. Spotify or Brave. */
   app: string;
+  /**
+   * That player's icon as a PNG data URL, for the circle in the notch.
+   * Empty when the platform cannot produce one, which is every platform
+   * except macOS, and any bundle that ships no .icns.
+   */
+  icon?: string;
 }
 
 export interface SourceInstanceState {
