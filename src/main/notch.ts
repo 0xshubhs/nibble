@@ -140,6 +140,14 @@ export class NotchPanel {
       maximizable: false,
       fullscreenable: false,
       skipTaskbar: true,
+      // Without this the panel never reaches the notch. AppKit runs every
+      // window through constrainFrameRect:toScreen: as it is ordered on
+      // screen, which pushes the frame down below the menu bar -- a 460x300
+      // panel asked for y=0 comes back at y=29, and setBounds cannot put it
+      // back once it is visible. This is the flag that makes Electron skip
+      // that constraint, and it has to be set at construction: the window
+      // level and the workspace behaviour have no effect on it.
+      enableLargerThanScreen: true,
       // An NSPanel floats without activating the app, so clicking it does not
       // pull the user out of whatever they were doing.
       type: 'panel',
