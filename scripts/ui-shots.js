@@ -227,6 +227,13 @@ if (q.get('browser')) {
   SNAPSHOT.memory.sources.find((s) => s.id === 'media').state.nowPlaying =
     ${JSON.stringify(nowPlayingApp)};
 }
+// ?busy=N puts the embedder partway through a model download, which is the
+// one state a first run spends real time in.
+const busyPct = q.get('busy');
+if (busyPct) {
+  SNAPSHOT.memory.stats.embedder.status = 'downloading';
+  SNAPSHOT.memory.stats.embedder.progress = Number(busyPct);
+}
 window.api = {
   getState: () => Promise.resolve(SNAPSHOT),
   searchMemory: () => Promise.resolve(${JSON.stringify(results)}),
@@ -274,6 +281,15 @@ const driver = `<script>
   if (q.get('ghost')) {
     const s = document.getElementById('shell');
     if (s) { s.style.opacity = '1'; s.style.transition = 'none'; }
+  }
+  // Headless virtual time does not reliably carry a transition that has a
+  // delay on it to its end, and the strip's text has a 180ms one -- which
+  // produced screenshots of an island with its label still at opacity 0.
+  // Every notch shot wants the settled state, so they all ask for this.
+  if (q.get('still')) {
+    const css = document.createElement('style');
+    css.textContent = '*,*::before,*::after{transition:none!important;animation:none!important}';
+    document.head.appendChild(css);
   }
   if (typeof applyShape === 'function') applyShape();
   // Anything that needs data has to wait for it.
@@ -343,11 +359,12 @@ const shots = [
   ['window-reminders', windowPage, '', '900,700'],
   ['window-memory', windowPage, '?tab=memory&related=1', '900,1000'],
   ['window-settings', windowPage, '?tab=settings', '900,820'],
-  ['notch-collapsed', notchPage, '?ghost=1', '500,140'],
-  ['notch-island', notchPage, '?pulsing=1', '500,140'],
-  ['notch-playing', notchPage, '?playing=1', '500,140'],
-  ['notch-browser', notchPage, '?browser=1', '500,140'],
-  ['notch-expanded', notchPage, '?expanded=1&playing=1', '500,320'],
+  ['notch-collapsed', notchPage, '?ghost=1&still=1', '500,140'],
+  ['notch-island', notchPage, '?pulsing=1&still=1', '500,140'],
+  ['notch-playing', notchPage, '?playing=1&still=1', '500,140'],
+  ['notch-browser', notchPage, '?browser=1&still=1', '500,140'],
+  ['notch-busy', notchPage, '?busy=38&still=1', '500,140'],
+  ['notch-expanded', notchPage, '?expanded=1&playing=1&still=1', '500,320'],
 ];
 
 for (const [name, page, query, size] of shots) {
