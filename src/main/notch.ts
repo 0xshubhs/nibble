@@ -1,5 +1,6 @@
 import path from 'path';
-import { execFileSync } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
+import { promisify } from 'util';
 import { app, BrowserWindow, powerMonitor, screen } from 'electron';
 import type { Display } from 'electron';
 import type { Settings } from '../types';
@@ -60,6 +61,58 @@ const LEAVE_MARGIN = 24;
  */
 const MIN_MENUBAR_H = 24;
 
+/** Used only until the real width has been measured, or if measuring fails. */
+const ASSUMED_NOTCH_W = 180;
+
+const run = promisify(execFile);
+
+/**
+ * The notch's width in points, measured rather than guessed.
+ *
+ * NSScreen has published this since macOS 12 -- `auxiliaryTopLeftArea` is the
+ * usable strip to the left of the notch, so the notch is whatever is left in
+ * the middle -- but Electron surfaces neither it nor `safeAreaInsets`. It is
+ * reachable anyway through AppleScript's ObjC bridge, which is AppKit in
+ * another process rather than a private API, and needs no permission.
+ *
+ * Guessing instead does not work. The width scales with the display mode, so
+ * it is not a constant per machine: this 14" M3 reports 165pt at 1352x878
+ * and would report a different number at every other scaled resolution.
+ *
+ * The screens are walked rather than asking for the main one, because the
+ * main screen is whichever holds the key window -- plug in a monitor and it
+ * is the one without a notch.
+ */
+const NOTCH_WIDTH_SCRIPT = [
+  'use framework "AppKit"',
+  'use scripting additions',
+  'repeat with s in (current application\'s NSScreen\'s screens() as list)',
+  '  try',
+  '    set L to s\'s auxiliaryTopLeftArea()',
+  '    set lw to item 1 of item 2 of L',
+  '    set w to item 1 of item 2 of (s\'s frame())',
+  '    if lw > 0 then return ((w - 2 * lw) as string)',
+  '  end try',
+  'end repeat',
+  'return "0"',
+].join('\n');
+
+async function measureNotchWidth(): Promise<number | null> {
+  if (process.platform !== 'darwin') return null;
+  try {
+    const { stdout } = await run('osascript', ['-l', 'AppleScript', '-e', NOTCH_WIDTH_SCRIPT], {
+      timeout: 4_000,
+      encoding: 'utf8',
+    });
+    const w = Math.round(Number(stdout.trim()));
+    // Zero means no screen admitted to having a notch, which is the honest
+    // answer on a Mac that does not.
+    return Number.isFinite(w) && w > 0 ? w : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Whether this Mac probably has a notch.
  *
@@ -105,11 +158,41 @@ export class NotchPanel {
   private display: Display | null = null;
   /** Pending open or close, held while the cursor proves it meant it. */
   private intent: NodeJS.Timeout | null = null;
+  /** The measured notch width, once the measurement has come back. */
+  private measured: number | null = null;
 
   constructor(private readonly deps: NotchDeps) {}
 
   supported(): boolean {
     return process.platform === 'darwin' && internalDisplay() !== null;
+  }
+
+  /**
+   * The width to treat the notch as.
+   *
+   * An explicit setting wins, because it exists for the case where the
+   * measurement is wrong or somebody simply wants a wider target. Otherwise
+   * it is what the OS said, and only failing that a guess.
+   */
+  private notchWidth(): number {
+    const set = this.deps.settings().notchWidth;
+    return Math.max(80, set || this.measured || ASSUMED_NOTCH_W);
+  }
+
+  /**
+   * Asks the OS how wide the notch is and tells the page when it answers.
+   *
+   * Deliberately not awaited anywhere. It costs about half a second, which
+   * is far too long to hold up showing the panel; the panel opens at the
+   * assumed width and morphs to the real one when this lands, which is a
+   * transition rather than a jump.
+   */
+  private remeasure(): void {
+    void measureNotchWidth().then((w) => {
+      if (w === null || w === this.measured) return;
+      this.measured = w;
+      this.sendGeometry();
+    });
   }
 
   get isOpen(): boolean {
@@ -193,6 +276,7 @@ export class NotchPanel {
     powerMonitor.on('unlock-screen', this.reposition);
 
     this.arm(POLL_IDLE_MS);
+    this.remeasure();
 
     // Development helper: hovering the notch cannot be scripted, so this opens
     // the panel on launch and holds it open for a look.
@@ -221,6 +305,9 @@ export class NotchPanel {
     const { x, y } = this.position(display);
     this.win?.setBounds({ x, y, width: EXPANDED_W, height: EXPANDED_H });
     this.sendGeometry();
+    // The width is a function of the display mode, so a metrics change
+    // invalidates it just as much as the position.
+    this.remeasure();
   };
 
   /**
@@ -229,7 +316,7 @@ export class NotchPanel {
    */
   private hotZone(): { x: number; y: number; width: number; height: number } | null {
     if (!this.display) return null;
-    const width = Math.max(80, this.deps.settings().notchWidth || 200);
+    const width = this.notchWidth();
     return {
       x: Math.round(this.display.bounds.x + (this.display.bounds.width - width) / 2),
       y: this.display.bounds.y,
@@ -321,7 +408,7 @@ export class NotchPanel {
         MIN_MENUBAR_H,
         this.display.workArea.y - this.display.bounds.y
       ),
-      notchWidth: Math.max(80, this.deps.settings().notchWidth || 200),
+      notchWidth: this.notchWidth(),
     });
   }
 

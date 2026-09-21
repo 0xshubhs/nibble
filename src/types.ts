@@ -76,6 +76,11 @@ export interface Settings {
    * only through NSScreen.safeAreaInsets, which Electron does not surface, so
    * this is a sane default the user can nudge.
    */
+  /**
+   * How wide to treat the notch as, in points. Zero means ask the OS, which
+   * is almost always better than a number typed in here: the width changes
+   * with the display's scaling mode, so there is no constant to hardcode.
+   */
   notchWidth: number;
 }
 

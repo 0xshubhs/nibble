@@ -127,7 +127,12 @@ const RADII = {
   expanded: { top: 14, bottom: 28 },
 };
 
-let geom = { menuBarHeight: 32, notchWidth: 200 };
+/**
+ * What to draw with until the main process sends the real numbers, which it
+ * does as soon as the page is ready and again whenever the display changes.
+ * Both are only ever wrong for a frame or two.
+ */
+let geom = { menuBarHeight: 32, notchWidth: 180 };
 
 /**
  * A notch-shaped path `w` by `h`, centred in the window.
