@@ -24,6 +24,16 @@ let searchSeq = 0;
 let pulseLabel: string | null = null;
 let playing: AppNowPlaying | null = null;
 
+/**
+ * Work with an end in sight: a model downloading, or a backlog of text
+ * waiting to be embedded.
+ *
+ * Both of these used to happen in complete silence unless the main window
+ * was open, which on a first run means the one moment the app is doing
+ * something slow is the one moment it looks broken.
+ */
+let busy: { label: string | null; pct: number } | null = null;
+
 /* ============================================================
    the shape
 
@@ -201,7 +211,11 @@ function currentShape(): NotchShape {
       bottom: RADII.expanded.bottom,
     };
   }
-  if (body.classList.contains('pulsing') || body.classList.contains('playing')) {
+  if (
+    body.classList.contains('pulsing') ||
+    body.classList.contains('busy') ||
+    body.classList.contains('playing')
+  ) {
     return {
       w: islandWidth(),
       h: geom.menuBarHeight,
@@ -259,9 +273,10 @@ function paint(state: AppSnapshot | null): void {
   // Live, not stored: the media source reports this the moment a track
   // starts, long before it has been playing long enough to be remembered.
   const np = state.memory?.sources.find((s) => s.id === 'media')?.state.nowPlaying ?? null;
-  const changed = (playing ? trackLine(playing) : '') !== (np ? trackLine(np) : '');
+  const was = stripKey();
   playing = np;
-  if (changed) renderStrip();
+  busy = busyFrom(state);
+  if (stripKey() !== was) renderStrip();
 
   renderNowPlaying(np);
 
@@ -269,6 +284,43 @@ function paint(state: AppSnapshot | null): void {
   const pause = el<HTMLButtonElement>('pause');
   pause.textContent = paused ? 'Paused' : 'Pause';
   pause.classList.toggle('on', paused);
+}
+
+/**
+ * What the app is busy with, if it is busy with something measurable.
+ *
+ * Only determinate work counts. A bar that fills is a promise about how long
+ * something will take, and the states without a number -- an embedder that
+ * is merely 'loading' -- cannot keep it, so they say nothing instead.
+ *
+ * A null label means fill the hairline and say nothing. That distinction is
+ * the whole design: a model download happens once, blocks everything and is
+ * worth interrupting for, while the embedding backlog is ordinary background
+ * work that can run for as long as it likes. Letting the backlog claim the
+ * strip would mean a busy machine never shows what is playing again.
+ */
+function busyFrom(state: AppSnapshot): { label: string | null; pct: number } | null {
+  const stats = state.memory?.stats;
+  if (!stats) return null;
+
+  const e = stats.embedder;
+  if (e?.status === 'downloading') {
+    return { label: 'Downloading model', pct: clampPct(e.progress) };
+  }
+
+  // The backlog: text is stored and searchable by keyword the moment it
+  // arrives, and the vectors land behind it. That gap is the wait.
+  const done = stats.embedded;
+  const total = done + stats.pending;
+  if (e?.ready && stats.pending > 0 && total > 0) {
+    return { label: null, pct: clampPct((done / total) * 100) };
+  }
+
+  return null;
+}
+
+function clampPct(n: number): number {
+  return Math.max(0, Math.min(100, Number.isFinite(n) ? n : 0));
 }
 
 /**
@@ -380,6 +432,21 @@ function setExpanded(on: boolean): void {
   }
 }
 
+/**
+ * Everything the strip draws itself from, as one string.
+ *
+ * Compared rather than diffed field by field so that a poll which changes
+ * nothing -- which is most of them -- does not touch the DOM. The percentage
+ * is in it because the bar has to move.
+ */
+function stripKey(): string {
+  return [
+    playing ? trackLine(playing) : '',
+    playing?.icon ? '1' : '0',
+    busy ? `${busy.label ?? ''}|${Math.round(busy.pct)}` : '',
+  ].join('\u0000');
+}
+
 /** What is playing, as one line. */
 function trackLine(np: AppNowPlaying): string {
   // macOS can often name the app but not the track: a browser is playing
@@ -396,17 +463,35 @@ function trackLine(np: AppNowPlaying): string {
  * It grows sideways on the notch's own line rather than downward, so it
  * never covers anything that was not already the notch.
  */
+/**
+ * What the closed strip shows, in priority order.
+ *
+ * A capture confirmation is news and wins outright; it is gone in two
+ * seconds. Work in progress outranks what is playing, because one of them
+ * ends and the other is ambient -- and because the hairline is filling for
+ * it either way, so a strip still talking about a track would be labelling
+ * the wrong thing.
+ */
 function renderStrip(): void {
   const body = document.body;
+  const showBusy = pulseLabel === null && busy?.label != null;
+  const showPlaying = pulseLabel === null && !showBusy && playing !== null;
+
   body.classList.toggle('pulsing', pulseLabel !== null);
-  body.classList.toggle('playing', pulseLabel === null && playing !== null);
+  body.classList.toggle('busy', showBusy);
+  body.classList.toggle('playing', showPlaying);
 
-  el('lip-text').textContent = pulseLabel ?? (playing ? trackLine(playing) : '');
+  el('lip-text').textContent =
+    pulseLabel ?? (showBusy ? busy!.label! : showPlaying ? trackLine(playing!) : '');
 
-  // The icon belongs to what is playing, so a capture's pulse borrows the
-  // dot instead: a confirmation is this app talking, not the player.
+  // The hairline is the progress track: it is already drawn around the whole
+  // silhouette, so filling part of it costs no new geometry.
+  document.documentElement.style.setProperty('--progress', `${busy ? busy.pct : 0}%`);
+
+  // The icon belongs to what is playing, so a capture's pulse and a download
+  // borrow the dot instead: neither is the player talking.
   const art = el<HTMLImageElement>('art');
-  const icon = pulseLabel === null ? (playing?.icon ?? '') : '';
+  const icon = showPlaying ? (playing?.icon ?? '') : '';
   if (icon) art.src = icon;
   else art.removeAttribute('src');
   art.hidden = !icon;

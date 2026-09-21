@@ -67,12 +67,40 @@ html, body {
    Instead this is a second silhouette one point larger in every direction
    sitting behind the black one; the point of it that is not covered is the
    line. It morphs on the same curve, or the outline would lag the shape. */
+/* Registered, rather than a plain custom property, so the fill can be
+   transitioned. An unregistered --progress is just a string to the engine
+   and snaps from one value to the next; declaring its syntax is what lets
+   it interpolate. */
+@property --progress {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 0%;
+}
+
 .shell-edge {
   position: absolute;
   inset: 0;
-  background: rgba(255, 255, 255, 0.22);
-  transition: clip-path var(--morph-ms, 400ms) cubic-bezier(0.32, 0.72, 0, 1);
+  /* The hairline doubles as the progress track. Left of the stop is work
+     done, right of it is the resting line at the alpha it has always been,
+     so an idle panel looks exactly as it did before any of this. */
+  background: linear-gradient(
+    to right,
+    rgba(255, 255, 255, 0.85) 0 var(--progress, 0%),
+    rgba(255, 255, 255, 0.22) var(--progress, 0%) 100%
+  );
+  transition:
+    clip-path var(--morph-ms, 400ms) cubic-bezier(0.32, 0.72, 0, 1),
+    --progress 320ms linear;
   will-change: clip-path;
+}
+
+/* Filling is the whole message while it lasts, so the dot stops competing
+   with it -- and there is no icon, because this is the app talking. */
+body.busy .dot { opacity: 1; }
+body.busy .strip-text {
+  opacity: 1;
+  max-width: 230px;
+  font-weight: 500;
 }
 
 /* ------------------------------------------------------------
