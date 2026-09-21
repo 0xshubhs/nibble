@@ -1,10 +1,11 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 
 /**
- * electron-builder `afterPack` hook. Does two jobs, in this order, because the
+ * electron-builder `afterPack` hook. Does three jobs, in this order, because the
  * signature has to cover the final contents.
  *
  * 1. Prune the other platforms' ONNX binaries.
@@ -15,7 +16,14 @@ const { execFileSync } = require('child_process');
  *    list overrides the top-level one instead of extending it, which silently
  *    dropped the other exclusions in that list.
  *
- * 2. Ad-hoc sign unsigned macOS builds.
+ * 2. Collapse byte-identical native libraries onto one copy.
+ *
+ *    onnxruntime ships libonnxruntime.1.dylib and libonnxruntime.1.30.0.dylib
+ *    as two real 43MB files with the same contents -- what upstream keeps as
+ *    a symlink arrives here materialised. The binding links the unversioned
+ *    name, so the other is 43MB of nothing.
+ *
+ * 3. Ad-hoc sign unsigned macOS builds.
  *
  *    Apple silicon refuses to execute any binary without a signature.
  *    Repacking the Electron bundle invalidates the one it shipped with, so an
@@ -80,6 +88,65 @@ function pruneNativeBinaries(context) {
   }
 }
 
+/**
+ * Replaces duplicate files in a directory with symlinks to one copy.
+ *
+ * Scoped to siblings on purpose: a link that pointed across directories
+ * would be a much bigger claim about what is safe to share, and every case
+ * this is here for -- a library and its versioned alias -- is siblings.
+ * Symlinked rather than deleted, so a name that something still looks for
+ * goes on resolving, at the cost of a directory entry.
+ *
+ * Runs before signing, because the signature has to cover the final layout.
+ */
+function dedupeNativeLibraries(context) {
+  const root = path.join(resourcesDir(context), 'app.asar.unpacked');
+  if (!fs.existsSync(root)) return;
+
+  let freed = 0;
+
+  const walk = (dir) => {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory()) walk(path.join(dir, entry.name));
+    }
+
+    // Group this directory's own files by content.
+    const byHash = new Map();
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const full = path.join(dir, entry.name);
+      // Only worth it for the big ones, and hashing every small file in
+      // node_modules would cost more than it saves.
+      if (fs.statSync(full).size < 1048576) continue;
+      const hash = crypto.createHash('sha1').update(fs.readFileSync(full)).digest('hex');
+      const list = byHash.get(hash) ?? [];
+      list.push(entry.name);
+      byHash.set(hash, list);
+    }
+
+    for (const names of byHash.values()) {
+      if (names.length < 2) continue;
+      // Keep the shortest name: that is the unversioned one, which is what
+      // install names point at.
+      names.sort((a, b) => a.length - b.length || a.localeCompare(b));
+      const [keep, ...rest] = names;
+      for (const name of rest) {
+        const full = path.join(dir, name);
+        freed += fs.statSync(full).size;
+        fs.rmSync(full);
+        fs.symlinkSync(keep, full);
+      }
+    }
+  };
+
+  walk(root);
+
+  if (freed > 0) {
+    console.log(`  • deduped native   ${Math.round(freed / 1048576)}MB of identical libraries`);
+  }
+}
+
 function dirSize(dir) {
   let total = 0;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -127,5 +194,6 @@ function adhocSign(context) {
 
 module.exports = async function afterPack(context) {
   pruneNativeBinaries(context);
+  dedupeNativeLibraries(context);
   adhocSign(context);
 };
