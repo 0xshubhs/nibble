@@ -51,9 +51,24 @@ export const metadata: Metadata = {
   twitter: { card: 'summary_large_image' },
 };
 
+/**
+ * Runs before paint so a stored theme choice applies immediately instead of
+ * flashing the OS-preferred theme first. Inline and tiny on purpose: this is
+ * the one script on the page allowed to block render.
+ */
+const themeScript = `
+try {
+  var t = localStorage.getItem('nibble-theme');
+  if (t === 'dark' || t === 'light') document.documentElement.setAttribute('data-theme', t);
+} catch (e) {}
+`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={satoshi.variable}>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body>
         <Nav />
         <main>{children}</main>

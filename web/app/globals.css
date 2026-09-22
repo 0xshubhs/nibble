@@ -60,8 +60,11 @@
   --nav-h: 66px;
 }
 
+/* Dark values apply on the OS preference by default, and are re-declared
+   under [data-theme] so the nav toggle can force either theme regardless of
+   what the OS says -- explicit choice always wins over the media query. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
     --ink: #ffffff;
     --paper: #000000;
     --accent: #ffffff;
@@ -82,6 +85,28 @@
 
     --ring: 0 0 0 4px rgba(255, 255, 255, 0.22);
   }
+}
+
+:root[data-theme='dark'] {
+  --ink: #ffffff;
+  --paper: #000000;
+  --accent: #ffffff;
+
+  --bg: #000000;
+  --bg-sunken: #0d0d0d;
+  --surface: #000000;
+  --surface-secondary: #151515;
+  --surface-hover: #242424;
+  --surface-invert: #ffffff;
+  --on-invert: #000000;
+  --border: #ffffff;
+  --border-soft: #333333;
+
+  --text: #ffffff;
+  --text-secondary: #b6b6b6;
+  --text-tertiary: #8a8a8a;
+
+  --ring: 0 0 0 4px rgba(255, 255, 255, 0.22);
 }
 
 /* ============================================================
@@ -415,6 +440,32 @@ kbd {
 .nav-links a.is-active { color: var(--paper); background: var(--ink); }
 
 .nav-cta { margin-left: 6px; }
+
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: var(--line) solid var(--ink);
+  border-radius: var(--radius-full);
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  flex: none;
+  margin-left: 6px;
+  transition: transform 0.1s ease, box-shadow 0.1s ease;
+}
+.theme-toggle:hover { transform: translate(-2px, -2px); box-shadow: var(--shadow-sm); }
+.theme-toggle:active { transform: translate(0, 0); box-shadow: none; }
+.theme-toggle svg { width: 17px; height: 17px; }
+.theme-toggle .sun { display: none; }
+:root[data-theme='dark'] .theme-toggle .moon { display: none; }
+:root[data-theme='dark'] .theme-toggle .sun { display: block; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .theme-toggle .moon { display: none; }
+  :root:not([data-theme='light']) .theme-toggle .sun { display: block; }
+}
 
 @media (max-width: 880px) {
   .nav-links a[data-optional] { display: none; }

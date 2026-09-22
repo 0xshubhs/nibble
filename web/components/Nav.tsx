@@ -17,6 +17,7 @@ const LINKS = [
 export function Nav() {
   const pathname = usePathname();
   const [stuck, setStuck] = useState(false);
+  const [theme, setTheme] = useState<'light' | 'dark' | null>(null);
 
   useEffect(() => {
     const onScroll = () => setStuck(window.scrollY > 6);
@@ -24,6 +25,26 @@ export function Nav() {
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
+
+  useEffect(() => {
+    // Reflects whatever the no-flash script in layout.tsx already put on
+    // <html>, so the button's icon matches the page on first paint.
+    const stored = document.documentElement.getAttribute('data-theme');
+    setTheme(stored === 'dark' ? 'dark' : stored === 'light' ? 'light' : null);
+  }, []);
+
+  const toggleTheme = () => {
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const current = theme ?? (prefersDark ? 'dark' : 'light');
+    const next = current === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try {
+      window.localStorage.setItem('nibble-theme', next);
+    } catch {
+      /* private mode or storage disabled: the toggle still works for this load */
+    }
+    setTheme(next);
+  };
 
   return (
     <header className={`nav${stuck ? ' is-stuck' : ''}`}>
@@ -51,6 +72,21 @@ export function Nav() {
             );
           })}
         </nav>
+
+        <button
+          type="button"
+          className="theme-toggle"
+          onClick={toggleTheme}
+          aria-label="Toggle dark and light theme"
+        >
+          <svg className="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="4.2" />
+            <path d="M12 3v2M12 19v2M4.2 4.2l1.4 1.4M18.4 18.4l1.4 1.4M3 12h2M19 12h2M4.2 19.8l1.4-1.4M18.4 5.6l1.4-1.4" />
+          </svg>
+          <svg className="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a6.6 6.6 0 0 0 10.5 10.5Z" />
+          </svg>
+        </button>
 
         <a className="btn btn-primary btn-sm nav-cta" href={LATEST}>
           Get it
