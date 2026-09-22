@@ -1,12 +1,21 @@
 import type {
+  CalendarAgenda,
   CaptureSourceId,
+  ClipboardEntry,
   NowPlaying,
   McpInfo,
+  NoteItem,
   Reminder,
   RendererApi,
+  ScratchpadState,
   SearchHit,
+  ShelfItem,
   Snapshot,
   SourceView,
+  StatsSnapshot,
+  TimerKind,
+  TimersState,
+  WeatherSnapshot,
 } from '../types';
 
 /**
@@ -26,6 +35,17 @@ declare global {
   type AppMcpInfo = McpInfo;
   type AppNowPlaying = NowPlaying;
   type AppSourceId = CaptureSourceId;
+
+  // --- notch tools ---
+  type AppTimerKind = TimerKind;
+  type AppTimersState = TimersState;
+  type AppClipboardEntry = ClipboardEntry;
+  type AppShelfItem = ShelfItem;
+  type AppStatsSnapshot = StatsSnapshot;
+  type AppCalendarAgenda = CalendarAgenda;
+  type AppScratchpadState = ScratchpadState;
+  type AppNoteItem = NoteItem;
+  type AppWeatherSnapshot = WeatherSnapshot;
 }
 
 export {};

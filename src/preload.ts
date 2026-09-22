@@ -54,6 +54,49 @@ const api: RendererApi = {
   revealData: () => ipcRenderer.invoke('app:reveal-data'),
   quit: () => ipcRenderer.invoke('app:quit'),
 
+  // --- notch tools ---
+
+  clipboardList: (query) => ipcRenderer.invoke('tools:clipboard:list', query),
+  clipboardCopy: (id) => ipcRenderer.invoke('tools:clipboard:copy', id),
+  clipboardPin: (id, pinned) => ipcRenderer.invoke('tools:clipboard:pin', id, pinned),
+  clipboardRemove: (id) => ipcRenderer.invoke('tools:clipboard:remove', id),
+  clipboardClear: () => ipcRenderer.invoke('tools:clipboard:clear'),
+
+  shelfList: () => ipcRenderer.invoke('tools:shelf:list'),
+  shelfAdd: (paths) => ipcRenderer.invoke('tools:shelf:add', paths),
+  shelfRemove: (id) => ipcRenderer.invoke('tools:shelf:remove', id),
+  // Fire-and-forget: startDrag has to be called synchronously from the main
+  // process's handling of the native dragstart, not awaited from the renderer.
+  shelfStartDrag: (id) => ipcRenderer.send('tools:shelf:drag-start', id),
+
+  timersGet: () => ipcRenderer.invoke('tools:timers:get'),
+  timersStart: (kind) => ipcRenderer.invoke('tools:timers:start', kind),
+  timersPause: () => ipcRenderer.invoke('tools:timers:pause'),
+  timersReset: (kind) => ipcRenderer.invoke('tools:timers:reset', kind),
+  timersSetCountdown: (seconds) => ipcRenderer.invoke('tools:timers:set-countdown', seconds),
+  timersSetHydration: (enabled, minutes) =>
+    ipcRenderer.invoke('tools:timers:set-hydration', enabled, minutes),
+
+  statsSubscribe: () => ipcRenderer.invoke('tools:stats:subscribe'),
+  statsUnsubscribe: () => ipcRenderer.invoke('tools:stats:unsubscribe'),
+
+  calendarAgenda: (days) => ipcRenderer.invoke('tools:calendar:agenda', days),
+  calendarCompleteReminder: (id) => ipcRenderer.invoke('tools:calendar:complete-reminder', id),
+
+  scratchpadGet: () => ipcRenderer.invoke('tools:scratchpad:get'),
+  scratchpadSet: (text) => ipcRenderer.invoke('tools:scratchpad:set', text),
+  scratchpadPin: (pinned) => ipcRenderer.invoke('tools:scratchpad:pin', pinned),
+
+  notesList: () => ipcRenderer.invoke('tools:notes:list'),
+  notesCreate: () => ipcRenderer.invoke('tools:notes:create'),
+  notesUpdate: (id, patch) => ipcRenderer.invoke('tools:notes:update', id, patch),
+  notesRemove: (id) => ipcRenderer.invoke('tools:notes:remove', id),
+
+  weatherGet: () => ipcRenderer.invoke('tools:weather:get'),
+  weatherSetLocation: (query) => ipcRenderer.invoke('tools:weather:set-location', query),
+
+  runMessage: (text) => ipcRenderer.invoke('tools:message:run', text),
+
   onState: (cb) => {
     const h = (_e: Electron.IpcRendererEvent, state: Parameters<typeof cb>[0]): void => cb(state);
     ipcRenderer.on('state', h);
@@ -74,6 +117,11 @@ const api: RendererApi = {
     ipcRenderer.on('notch:pulse', h);
     return () => ipcRenderer.off('notch:pulse', h);
   },
+  onNotchMessage: (cb) => {
+    const h = (_e: Electron.IpcRendererEvent, payload: Parameters<typeof cb>[0]): void => cb(payload);
+    ipcRenderer.on('notch:message', h);
+    return () => ipcRenderer.off('notch:message', h);
+  },
   onNotchGeometry: (cb) => {
     const h = (
       _e: Electron.IpcRendererEvent,
@@ -81,6 +129,17 @@ const api: RendererApi = {
     ): void => cb(g);
     ipcRenderer.on('notch:geometry', h);
     return () => ipcRenderer.off('notch:geometry', h);
+  },
+  onTimersTick: (cb) => {
+    const h = (_e: Electron.IpcRendererEvent, state: Parameters<typeof cb>[0]): void => cb(state);
+    ipcRenderer.on('tools:timers:tick', h);
+    return () => ipcRenderer.off('tools:timers:tick', h);
+  },
+  onStatsTick: (cb) => {
+    const h = (_e: Electron.IpcRendererEvent, snapshot: Parameters<typeof cb>[0]): void =>
+      cb(snapshot);
+    ipcRenderer.on('tools:stats:tick', h);
+    return () => ipcRenderer.off('tools:stats:tick', h);
   },
 };
 

@@ -28,8 +28,10 @@ import type { Settings } from '../types';
  */
 
 const COLLAPSED_H = 40;
-const EXPANDED_W = 460;
-const EXPANDED_H = 300;
+// Wide enough for the icon rail plus the content column beside it -- eleven
+// tools live here now, in a sidebar rather than a row of tabs. See notch.html.
+const EXPANDED_W = 520;
+const EXPANDED_H = 480;
 
 /**
  * Two poll rates, because the two jobs are not the same job.
@@ -193,6 +195,25 @@ export class NotchPanel {
         this.setExpanded(true);
         if (this.timer) clearInterval(this.timer);
         this.timer = null;
+
+        const shotArg = process.argv.find((a) => a.startsWith('--screenshot-notch='));
+        if (shotArg) {
+          const file = shotArg.slice('--screenshot-notch='.length);
+          const tabArg = (process.argv.find((a) => a.startsWith('--notch-tab=')) ?? '').slice(12);
+          setTimeout(() => {
+            void (async () => {
+              if (tabArg) {
+                await this.win?.webContents.executeJavaScript(
+                  `document.querySelector('[data-tab="${tabArg}"]')?.click()`
+                );
+                await new Promise((r) => setTimeout(r, 400));
+              }
+              const img = await this.win!.webContents.capturePage();
+              (await import('fs')).writeFileSync(file, img.toPNG());
+              console.log(`NOTCH_SHOT ${file}`);
+            })();
+          }, 500);
+        }
       }, 900);
     }
 
@@ -341,6 +362,29 @@ export class NotchPanel {
   pulse(label: string): void {
     if (!this.isOpen) return;
     this.win!.webContents.send('notch:pulse', label);
+  }
+
+  /**
+   * A message the user typed themselves, run across the collapsed strip.
+   * Separate from `pulse`, which is the app's own brief system feedback --
+   * this is deliberate and can run far longer than a two-second pulse, so
+   * the renderer needs its own duration to animate against.
+   */
+  message(text: string, durationMs: number): void {
+    if (!this.isOpen) return;
+    this.win!.webContents.send('notch:message', { text, durationMs });
+  }
+
+  /**
+   * A generic push for the tool tabs (timers, stats), which tick on their own
+   * clock rather than through the shared `state` snapshot. Dropped silently
+   * while the panel doesn't exist, same as `send` and `pulse` -- there is
+   * nothing to catch up on the other end when it next opens, because the tool
+   * itself is asked for a fresh reading as soon as its tab is shown.
+   */
+  push(channel: string, payload: unknown): void {
+    if (!this.isOpen) return;
+    this.win!.webContents.send(channel, payload);
   }
 
   stop(): void {

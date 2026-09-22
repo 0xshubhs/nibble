@@ -105,7 +105,8 @@ body.expanded .shell {
 }
 
 body.pulsing .dot,
-body.playing .dot { opacity: 1; }
+body.playing .dot,
+body.messaging .dot { opacity: 1; }
 body.pulsing .strip-text { opacity: 1; max-width: 220px; }
 
 /* A track sits there for as long as it plays, so it gets more room than a
@@ -118,8 +119,26 @@ body.playing .strip-text {
 }
 /* Breathing rather than blinking: it is saying that something is going on,
    not asking to be looked at. */
-body.playing .dot { animation: breathe 2.6s ease-in-out infinite; }
+body.playing .dot,
+body.messaging .dot { animation: breathe 2.6s ease-in-out infinite; }
 @keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* A message someone typed on purpose scrolls across rather than sitting
+   still and truncating -- the one place in the strip that behaves like an
+   actual dot-matrix sign. Duration comes from main, set as a custom
+   property, because it is computed from the message's own length. */
+body.messaging .strip-text {
+  opacity: 1;
+  max-width: 260px;
+  white-space: nowrap;
+  font-weight: 500;
+  animation: marquee linear;
+  animation-duration: var(--marquee-duration, 6s);
+}
+@keyframes marquee {
+  from { transform: translateX(100%); }
+  to { transform: translateX(-100%); }
+}
 
 /* Expanding cancels whatever the strip was saying, immediately. */
 body.expanded .dot,
@@ -128,6 +147,7 @@ body.expanded .strip-text {
   max-width: 0;
   transition-duration: 120ms;
   transition-delay: 0s;
+  animation: none;
 }
 
 /* ------------------------------------------------------------
@@ -135,7 +155,7 @@ body.expanded .strip-text {
    ------------------------------------------------------------ */
 
 .panel {
-  padding: 4px 16px 14px;
+  padding: 12px 16px 12px;
   background: var(--surface);
   opacity: 0;
   /* Scaled from the top, so it appears to unfold out of the strip rather
@@ -162,6 +182,96 @@ body.expanded .panel {
   transition:
     opacity 300ms ease-out 30ms,
     transform 520ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* ------------------------------------------------------------
+   panel body: an icon rail down the left, everything else in one
+   content column beside it. Eleven tools is too many for a row of
+   tabs to give each a reliable hit target, so this is a sidebar
+   instead, the way a real dashboard's nav is -- grouped into four
+   clusters (overview, capture, ambient, output) with a little air
+   between them rather than one undifferentiated wall of icons.
+   ------------------------------------------------------------ */
+
+.panel-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+  padding-right: 12px;
+  border-right: 1px solid var(--border-soft);
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.rail-btn {
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-input);
+  color: var(--text-secondary);
+  cursor: default;
+  opacity: 0.65;
+  transition: opacity 120ms ease-out, background 120ms ease-out, color 120ms ease-out;
+}
+.rail-btn:hover { opacity: 1; background: var(--surface-hover); }
+.rail-btn.on {
+  opacity: 1;
+  color: var(--text);
+  background: var(--surface-secondary);
+  border-color: var(--border-soft);
+}
+/* The first tool in each cluster after Home gets a little breathing room,
+   so the four groups read as groups without needing their own divider. */
+.rail-btn.rail-group { margin-top: 6px; }
+
+.rail-btn .icon {
+  width: 15px;
+  height: 15px;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.content {
+  flex: 1;
+  min-width: 0;
+}
+
+.view {
+  max-height: 340px;
+  overflow-y: auto;
+}
+.view[hidden] { display: none; }
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+.section-head .ghost { padding: 4px 10px; font-size: 10.5px; }
+
+.hint {
+  margin: 2px 0 10px;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 11px;
 }
 
 .row { display: flex; gap: 8px; }
@@ -238,6 +348,467 @@ input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ------------------------------------------------------------
+   a small icon button, for the action row inside a clipboard hit
+   or a shelf item -- lighter than .ghost, meant to sit beside text
+   rather than stand alone.
+   ------------------------------------------------------------ */
+
+.mini {
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  padding: 3px 5px;
+  border-radius: var(--radius-sm);
+  cursor: default;
+  transition: background 120ms ease-out, color 120ms ease-out;
+}
+.mini:hover { background: var(--surface-hover); color: var(--text); }
+.mini.on { color: var(--text); }
+.mini-icon {
+  width: 12px;
+  height: 12px;
+  display: block;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ------------------------------------------------------------
+   clipboard: reuses .hits/.hit, adding an action row
+   ------------------------------------------------------------ */
+
+.hit-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.hit-row .b { flex: 1; }
+.hit-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* ------------------------------------------------------------
+   shelf: a drop target that holds files, and hands them back out
+   ------------------------------------------------------------ */
+
+.shelf-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.shelf-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-input);
+  padding: 7px 9px;
+  cursor: grab;
+  user-select: none;
+}
+.shelf-item:active { cursor: grabbing; opacity: 0.8; }
+.shelf-item .icon { flex-shrink: 0; color: var(--text-tertiary); }
+.shelf-item .icon .mini-icon { width: 14px; height: 14px; }
+.shelf-item .name {
+  flex: 1;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.shelf-item .size {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+/* ------------------------------------------------------------
+   timers: one face shared by pomodoro, countdown and stopwatch
+   ------------------------------------------------------------ */
+
+.timer-modes {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.timer-modes .ghost { flex: 1; padding: 6px 4px; }
+.timer-modes .ghost.on { background: var(--ink); color: var(--paper); }
+
+.timer-face {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin: 6px 0 10px;
+}
+.timer-time {
+  font-size: 34px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.timer-phase {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+
+.timer-presets {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin-bottom: 10px;
+}
+.timer-presets .ghost { padding: 5px 10px; }
+.timer-presets .ghost.on { background: var(--ink); color: var(--paper); }
+
+.timer-controls {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 12px;
+}
+.timer-controls .ghost { flex: 1; max-width: 130px; }
+.timer-controls .ghost.on { background: var(--ink); color: var(--paper); }
+
+.hydration {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hydration-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+}
+.hydration-row input[type='checkbox'] { accent-color: var(--ink); }
+.hydration-mins {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.hydration-mins input[type='number'] {
+  width: 40px;
+  font: inherit;
+  font-size: 11.5px;
+  color: var(--text);
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: 2px 4px;
+  text-align: center;
+}
+
+/* ------------------------------------------------------------
+   stats: five rows, a bar and a number, nothing else
+   ------------------------------------------------------------ */
+
+.stat-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+}
+.stat-label {
+  width: 52px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+.stat-row .bar {
+  flex: 1;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-soft);
+  overflow: hidden;
+}
+.stat-row .bar i {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: var(--ink);
+  transition: width 400ms ease-out;
+}
+.stat-val {
+  width: 54px;
+  flex-shrink: 0;
+  text-align: right;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.stat-net { width: auto; flex: 1; text-align: left; }
+
+/* ------------------------------------------------------------
+   calendar: a 7-day agenda, and the reminders sitting under it
+   ------------------------------------------------------------ */
+
+.cal-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.cal-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-input);
+  padding: 6px 9px;
+}
+.cal-item .when {
+  flex-shrink: 0;
+  width: 58px;
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+}
+.cal-item .title {
+  flex: 1;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cal-item.reminder { cursor: default; }
+.cal-item.reminder input[type='checkbox'] {
+  flex-shrink: 0;
+  accent-color: var(--ink);
+}
+.cal-item.done .title {
+  text-decoration: line-through;
+  color: var(--text-tertiary);
+}
+
+/* ------------------------------------------------------------
+   home: a landing tab composed from what the other tools already
+   know, plus a launcher -- no state of its own.
+   ------------------------------------------------------------ */
+
+.home-now,
+.home-next {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  margin-bottom: 8px;
+}
+.home-eyebrow {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-tertiary);
+}
+.home-value {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.home-launch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 10px;
+}
+.home-launch .ghost { padding: 8px 0; }
+
+/* ------------------------------------------------------------
+   notes: a short list beside the note that's open
+   ------------------------------------------------------------ */
+
+.notes-layout {
+  display: flex;
+  gap: 10px;
+}
+
+.notes-side {
+  width: 128px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.notes-side .ghost { width: 100%; }
+
+.notes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow-y: auto;
+  max-height: 240px;
+}
+.note-item {
+  padding: 6px 8px;
+  border-radius: var(--radius-input);
+  border: 1px solid transparent;
+  cursor: default;
+}
+.note-item:hover { background: var(--surface-hover); }
+.note-item.on { background: var(--surface-secondary); border-color: var(--border-soft); }
+.note-item .title {
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.note-item .snippet {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.notes-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.notes-main input[type='text'] {
+  font: inherit;
+  font-weight: 700;
+  font-size: 12.5px;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--border-soft);
+  padding: 2px 0 6px;
+}
+.notes-main input[type='text']:focus { outline: none; border-color: var(--border); }
+.notes-main textarea {
+  flex: 1;
+  min-height: 130px;
+  resize: none;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+.notes-main textarea:focus { outline: none; }
+.notes-main .mini { align-self: flex-start; }
+
+/* ------------------------------------------------------------
+   scratchpad: one box, full width, nothing else fighting it
+   ------------------------------------------------------------ */
+
+textarea.scratch {
+  width: 100%;
+  height: 230px;
+  resize: none;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-input);
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+textarea.scratch:focus {
+  outline: none;
+  border-color: var(--border);
+  box-shadow: var(--ring);
+}
+textarea.scratch::placeholder { color: var(--text-tertiary); }
+
+/* ------------------------------------------------------------
+   weather: current conditions, then seven short rows
+   ------------------------------------------------------------ */
+
+.weather-now {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  margin-bottom: 10px;
+}
+.weather-temp {
+  font-size: 28px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.weather-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.weather-meta span:first-child { font-size: 12px; }
+.weather-loc {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wx-days {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.wx-day {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 2px;
+  font-size: 11.5px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.wx-day:last-child { border-bottom: none; }
+.wx-day .d { width: 40px; flex-shrink: 0; font-weight: 700; }
+.wx-day .c { flex: 1; color: var(--text-secondary); }
+.wx-day .t {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
 }
 
 .foot {

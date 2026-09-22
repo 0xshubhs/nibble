@@ -23,6 +23,14 @@ import { McpBridge } from './mcp/server';
 import { NotchPanel, notchPaths, likelyNotched } from './notch';
 import { QuickCapture, DEFAULT_SHORTCUT } from './quickcapture';
 import { isSecret } from './capture/clipboard';
+import { TimersEngine } from './tools/timers';
+import { ClipboardHistory } from './tools/clipboard-history';
+import { Shelf } from './tools/shelf';
+import { StatsEngine } from './tools/stats';
+import * as calendarTool from './tools/calendar';
+import { Scratchpad } from './tools/scratchpad';
+import { NotesStore } from './tools/notes';
+import { Weather } from './tools/weather';
 import type {
   BackendConfig,
   CaptureSourceId,
@@ -31,6 +39,7 @@ import type {
   SearchOptions,
   Settings,
   Snapshot,
+  TimerKind,
 } from '../types';
 
 // Windows needs this before any notification is shown, or toasts are
@@ -57,6 +66,16 @@ let notch: NotchPanel | null = null;
 let quick: QuickCapture | null = null;
 let win: BrowserWindow | null = null;
 let quitting = false;
+
+// --- notch tools: five self-contained utilities, independent of the
+// reminders/memory state above. See the "notch tools" section of types.ts.
+let timers: TimersEngine | null = null;
+let clipboardHistory: ClipboardHistory | null = null;
+let shelf: Shelf | null = null;
+let stats: StatsEngine | null = null;
+let scratchpad: Scratchpad | null = null;
+let notes: NotesStore | null = null;
+let weather: Weather | null = null;
 
 /* ---------------- window ---------------- */
 
@@ -573,6 +592,65 @@ function registerIpc(): void {
     quitting = true;
     app.quit();
   });
+
+  /* ---- notch tools ---- */
+
+  ipcMain.handle('tools:clipboard:list', (_e, query?: string) => clipboardHistory?.list(query) ?? []);
+  ipcMain.handle('tools:clipboard:copy', (_e, id: string) => clipboardHistory?.copy(id) ?? false);
+  ipcMain.handle('tools:clipboard:pin', (_e, id: string, pinned: boolean) =>
+    clipboardHistory?.pin(id, pinned) ?? []
+  );
+  ipcMain.handle('tools:clipboard:remove', (_e, id: string) => clipboardHistory?.remove(id) ?? []);
+  ipcMain.handle('tools:clipboard:clear', () => clipboardHistory?.clear() ?? []);
+
+  ipcMain.handle('tools:shelf:list', () => shelf?.list() ?? []);
+  ipcMain.handle('tools:shelf:add', (_e, paths: string[]) => shelf?.add(paths ?? []) ?? []);
+  ipcMain.handle('tools:shelf:remove', (_e, id: string) => shelf?.remove(id) ?? []);
+  ipcMain.on('tools:shelf:drag-start', (e, id: string) => shelf?.startDrag(id, e.sender));
+
+  ipcMain.handle('tools:timers:get', () => timers?.state() ?? null);
+  ipcMain.handle('tools:timers:start', (_e, kind: TimerKind) => timers?.start(kind) ?? null);
+  ipcMain.handle('tools:timers:pause', () => timers?.pause() ?? null);
+  ipcMain.handle('tools:timers:reset', (_e, kind: TimerKind) => timers?.reset(kind) ?? null);
+  ipcMain.handle('tools:timers:set-countdown', (_e, seconds: number) =>
+    timers?.setCountdown(seconds) ?? null
+  );
+  ipcMain.handle('tools:timers:set-hydration', (_e, enabled: boolean, minutes: number) =>
+    timers?.setHydration(enabled, minutes) ?? null
+  );
+
+  ipcMain.handle('tools:stats:subscribe', () => stats?.subscribe() ?? null);
+  ipcMain.handle('tools:stats:unsubscribe', () => stats?.unsubscribe());
+
+  ipcMain.handle('tools:calendar:agenda', (_e, days?: number) => calendarTool.getAgenda(days));
+  ipcMain.handle('tools:calendar:complete-reminder', (_e, id: string) =>
+    calendarTool.completeReminder(id)
+  );
+
+  ipcMain.handle('tools:scratchpad:get', () => scratchpad?.get() ?? null);
+  ipcMain.handle('tools:scratchpad:set', (_e, text: string) => scratchpad?.set(text) ?? null);
+  ipcMain.handle('tools:scratchpad:pin', (_e, pinned: boolean) => scratchpad?.setPinned(pinned) ?? null);
+
+  ipcMain.handle('tools:notes:list', () => notes?.list() ?? []);
+  ipcMain.handle('tools:notes:create', () => notes?.create() ?? []);
+  ipcMain.handle('tools:notes:update', (_e, id: string, patch: { title?: string; body?: string }) =>
+    notes?.update(id, patch) ?? []
+  );
+  ipcMain.handle('tools:notes:remove', (_e, id: string) => notes?.remove(id) ?? []);
+
+  ipcMain.handle('tools:weather:get', () => weather?.get() ?? null);
+  ipcMain.handle('tools:weather:set-location', (_e, query: string) =>
+    weather?.setLocation(query) ?? null
+  );
+
+  ipcMain.handle('tools:message:run', (_e, text: string) => {
+    const clean = String(text ?? '').trim().slice(0, 240);
+    if (!clean) return;
+    // Long enough to actually be read once it's scrolling, capped so a
+    // pasted essay can't wedge the strip open for minutes.
+    const durationMs = Math.min(20_000, Math.max(2500, clean.length * 220));
+    notch?.message(clean, durationMs);
+  });
 }
 
 /* ---------------- lifecycle ---------------- */
@@ -633,6 +711,22 @@ void app.whenReady().then(() => {
     notch?.pulse(e.title || `${e.chunks} remembered`);
     pushState();
   });
+
+  /* ---- notch tools ---- */
+
+  timers = new TimersEngine(dataPath().dir);
+  timers.on('tick', (state) => notch?.push('tools:timers:tick', state));
+  timers.on('notify', ({ title, body }) => toast(title, body));
+
+  clipboardHistory = new ClipboardHistory(dataPath().dir);
+  shelf = new Shelf(dataPath().dir);
+
+  stats = new StatsEngine();
+  stats.on('tick', (snap) => notch?.push('tools:stats:tick', snap));
+
+  scratchpad = new Scratchpad(dataPath().dir);
+  notes = new NotesStore(dataPath().dir);
+  weather = new Weather(dataPath().dir);
 
   // The model load and the first index pass must not hold up the window or
   // the reminder scheduler, so this is deliberately not awaited.
@@ -697,6 +791,9 @@ app.on('before-quit', () => {
   memory?.stop();
   notch?.stop();
   quick?.stop();
+  timers?.stop();
+  clipboardHistory?.stop();
+  stats?.stop();
 });
 
 app.on('will-quit', () => {

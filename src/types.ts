@@ -346,6 +346,132 @@ export interface Snapshot {
   memory: MemoryView | null;
 }
 
+/* ---------------- notch tools ---------------- */
+/**
+ * Five self-contained utilities that live as tabs in the notch panel,
+ * alongside memory search. Each one owns its own storage and its own IPC
+ * surface rather than going through the reminders/memory `Snapshot`, because
+ * their state changes on a much faster clock (a clipboard poll, a running
+ * timer, a system-stats sample) and folding that into the one broadcast that
+ * already drives the whole window would mean re-rendering everything in it
+ * several times a second for data the window never shows.
+ */
+
+export type TimerKind = 'pomodoro' | 'countdown' | 'stopwatch';
+export type PomodoroPhase = 'work' | 'break';
+
+export interface TimersState {
+  active: TimerKind | null;
+  running: boolean;
+  /** Seconds left, for pomodoro and countdown; seconds elapsed, for stopwatch. */
+  seconds: number;
+  pomodoroPhase: PomodoroPhase;
+  /** Completed work phases, this session. */
+  pomodoroCount: number;
+  /** What a countdown was last set to, so resetting it doesn't lose it. */
+  countdownTotal: number;
+  hydrationEnabled: boolean;
+  hydrationMinutes: number;
+  /** Epoch ms of the next hydration nudge, or null while it's off. */
+  hydrationNextAt: number | null;
+}
+
+export interface ClipboardEntry {
+  id: string;
+  text: string;
+  ts: number;
+  pinned: boolean;
+}
+
+export interface ShelfItem {
+  id: string;
+  name: string;
+  /** Where the copy actually lives on disk, inside app data. */
+  path: string;
+  size: number;
+  addedAt: number;
+}
+
+export interface StatSupport {
+  disk: boolean;
+  battery: boolean;
+  network: boolean;
+}
+
+export interface StatsSnapshot {
+  /** Null on the first sample: CPU load needs two points in time. */
+  cpuPercent: number | null;
+  memPercent: number;
+  memUsedBytes: number;
+  memTotalBytes: number;
+  disk: { usedBytes: number; totalBytes: number; percent: number } | null;
+  battery: { percent: number; charging: boolean } | null;
+  /** Null on the first sample, and whenever the interface can't be read. */
+  network: { upBytesPerSec: number; downBytesPerSec: number; iface: string } | null;
+  supported: StatSupport;
+}
+
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  start: number;
+  end: number;
+  calendar: string;
+  allDay: boolean;
+}
+
+export interface CalendarReminderItem {
+  id: string;
+  title: string;
+  due: number | null;
+  list: string;
+}
+
+export interface CalendarAgenda {
+  ok: boolean;
+  error?: string;
+  events: CalendarEvent[];
+  reminders: CalendarReminderItem[];
+}
+
+export interface ScratchpadState {
+  text: string;
+  /** Shown on the collapsed strip, the way a played track is. */
+  pinned: boolean;
+  updatedAt: number;
+}
+
+export interface NoteItem {
+  id: string;
+  title: string;
+  body: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface WeatherLocation {
+  name: string;
+  lat: number;
+  lon: number;
+}
+
+export interface WeatherDay {
+  /** YYYY-MM-DD, in the location's own timezone. */
+  date: string;
+  max: number;
+  min: number;
+  code: number;
+}
+
+export interface WeatherSnapshot {
+  ok: boolean;
+  error?: string;
+  location: WeatherLocation | null;
+  current: { temp: number; code: number } | null;
+  daily: WeatherDay[];
+  fetchedAt: number | null;
+}
+
 /* ---------------- the preload bridge ---------------- */
 
 export interface CaptureToggleResult {
@@ -413,10 +539,55 @@ export interface RendererApi {
   revealData(): Promise<string>;
   quit(): Promise<void>;
 
+  // --- notch tools ---
+
+  clipboardList(query?: string): Promise<ClipboardEntry[]>;
+  clipboardCopy(id: string): Promise<boolean>;
+  clipboardPin(id: string, pinned: boolean): Promise<ClipboardEntry[]>;
+  clipboardRemove(id: string): Promise<ClipboardEntry[]>;
+  clipboardClear(): Promise<ClipboardEntry[]>;
+
+  shelfList(): Promise<ShelfItem[]>;
+  shelfAdd(paths: string[]): Promise<ShelfItem[]>;
+  shelfRemove(id: string): Promise<ShelfItem[]>;
+  /** Fire-and-forget: tells main to start an OS-level file drag for this item. */
+  shelfStartDrag(id: string): void;
+
+  timersGet(): Promise<TimersState>;
+  timersStart(kind: TimerKind): Promise<TimersState>;
+  timersPause(): Promise<TimersState>;
+  timersReset(kind: TimerKind): Promise<TimersState>;
+  timersSetCountdown(seconds: number): Promise<TimersState>;
+  timersSetHydration(enabled: boolean, minutes: number): Promise<TimersState>;
+
+  statsSubscribe(): Promise<StatsSnapshot>;
+  statsUnsubscribe(): Promise<void>;
+
+  calendarAgenda(days?: number): Promise<CalendarAgenda>;
+  calendarCompleteReminder(id: string): Promise<boolean>;
+
+  scratchpadGet(): Promise<ScratchpadState>;
+  scratchpadSet(text: string): Promise<ScratchpadState>;
+  scratchpadPin(pinned: boolean): Promise<ScratchpadState>;
+
+  notesList(): Promise<NoteItem[]>;
+  notesCreate(): Promise<NoteItem[]>;
+  notesUpdate(id: string, patch: { title?: string; body?: string }): Promise<NoteItem[]>;
+  notesRemove(id: string): Promise<NoteItem[]>;
+
+  weatherGet(): Promise<WeatherSnapshot>;
+  weatherSetLocation(query: string): Promise<WeatherSnapshot>;
+
+  /** Runs a message across the collapsed strip -- the notch's own marquee. */
+  runMessage(text: string): Promise<void>;
+
   /** All of these return an unsubscribe function. */
   onState(cb: (state: Snapshot) => void): () => void;
   onFocusReminder(cb: (id: string) => void): () => void;
   onNotchExpanded(cb: (expanded: boolean) => void): () => void;
   onNotchPulse(cb: (label: string) => void): () => void;
+  onNotchMessage(cb: (payload: { text: string; durationMs: number }) => void): () => void;
   onNotchGeometry(cb: (g: { menuBarHeight: number; notchWidth: number }) => void): () => void;
+  onTimersTick(cb: (state: TimersState) => void): () => void;
+  onStatsTick(cb: (snapshot: StatsSnapshot) => void): () => void;
 }

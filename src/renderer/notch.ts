@@ -23,6 +23,40 @@ let searchSeq = 0;
  */
 let pulseLabel: string | null = null;
 let playing: AppNowPlaying | null = null;
+let messageLabel: string | null = null;
+let messageTimer: ReturnType<typeof setTimeout> | null = null;
+/** Set only while a scratchpad is both pinned and non-empty. */
+let pinnedScratchText: string | null = null;
+
+/* ---------------- small icons ----------------
+   The rail's icons live as literal <svg> in notch.html because there are
+   eleven of them and they never change. These two are generated at runtime
+   -- inside a clipboard entry, inside a shelf row -- so they're built the
+   same way the rest of that markup is, from trusted strings this file
+   itself wrote, never from anything a person typed. */
+
+const ICON_PIN =
+  '<svg viewBox="0 0 20 20" class="mini-icon"><circle cx="10" cy="8" r="3.2"/><line x1="10" y1="11" x2="10" y2="17"/></svg>';
+const ICON_FILE =
+  '<svg viewBox="0 0 20 20" class="mini-icon"><rect x="5" y="3" width="10" height="14" rx="1"/><line x1="7.5" y1="7.5" x2="12.5" y2="7.5"/><line x1="7.5" y1="10.5" x2="12.5" y2="10.5"/></svg>';
+
+/* ---------------- tabs ---------------- */
+
+const TAB_IDS = [
+  'home',
+  'search',
+  'clipboard',
+  'shelf',
+  'notes',
+  'scratchpad',
+  'timers',
+  'stats',
+  'calendar',
+  'weather',
+  'message',
+] as const;
+type TabId = (typeof TAB_IDS)[number];
+let activeTab: TabId = 'home';
 
 /* ============================================================
    the shape
@@ -45,6 +79,7 @@ let playing: AppNowPlaying | null = null;
  */
 const PULSE_WING = 72;
 const MEDIA_WING = 122;
+const MESSAGE_WING = 140;
 
 const RADII = {
   collapsed: { top: 7, bottom: 9 },
@@ -98,8 +133,16 @@ function applyShape(): void {
     shell.style.clipPath = `path('${notchPath(window.innerWidth, window.innerHeight, RADII.expanded.top, RADII.expanded.bottom)}')`;
     return;
   }
-  if (body.classList.contains('pulsing') || body.classList.contains('playing')) {
-    const wing = body.classList.contains('pulsing') ? PULSE_WING : MEDIA_WING;
+  if (
+    body.classList.contains('pulsing') ||
+    body.classList.contains('playing') ||
+    body.classList.contains('messaging')
+  ) {
+    const wing = body.classList.contains('pulsing')
+      ? PULSE_WING
+      : body.classList.contains('messaging')
+        ? MESSAGE_WING
+        : MEDIA_WING;
     shell.style.clipPath = `path('${notchPath(geom.notchWidth + wing * 2, geom.menuBarHeight, RADII.island.top, RADII.island.bottom)}')`;
     return;
   }
@@ -137,6 +180,8 @@ function paint(state: AppSnapshot | null): void {
   const pause = el<HTMLButtonElement>('pause');
   pause.textContent = paused ? 'Paused' : 'Pause';
   pause.classList.toggle('on', paused);
+
+  if (activeTab === 'home') renderHome();
 }
 
 /* ---------------- search ---------------- */
@@ -189,18 +234,633 @@ async function runNotchSearch(): Promise<void> {
   renderNotchHits(hits, q);
 }
 
+/* ---------------- clipboard ---------------- */
+
+let clipSearchSeq = 0;
+
+function renderClipboard(entries: AppClipboardEntry[], query: string): void {
+  const list = el('clip-list');
+  const empty = el('clip-empty');
+
+  if (!entries.length) {
+    list.replaceChildren();
+    empty.hidden = false;
+    empty.textContent = query ? `Nothing matches "${query}".` : 'Nothing copied yet.';
+    return;
+  }
+  empty.hidden = true;
+
+  list.replaceChildren(
+    ...entries.map((entry) => {
+      const li = document.createElement('li');
+      li.className = 'hit';
+
+      const row = document.createElement('div');
+      row.className = 'hit-row';
+
+      const body = document.createElement('div');
+      body.className = 'b';
+      body.textContent = entry.text;
+
+      const actions = document.createElement('div');
+      actions.className = 'hit-actions';
+
+      const pin = document.createElement('button');
+      pin.className = `mini${entry.pinned ? ' on' : ''}`;
+      pin.type = 'button';
+      pin.title = entry.pinned ? 'Unpin' : 'Pin';
+      pin.innerHTML = ICON_PIN;
+      pin.addEventListener('click', (e) => {
+        e.stopPropagation();
+        void window.api
+          .clipboardPin(entry.id, !entry.pinned)
+          .then((rows) => renderClipboard(rows, el<HTMLInputElement>('clip-q').value.trim()));
+      });
+
+      const remove = document.createElement('button');
+      remove.className = 'mini';
+      remove.type = 'button';
+      remove.title = 'Remove';
+      remove.textContent = '✕';
+      remove.addEventListener('click', (e) => {
+        e.stopPropagation();
+        void window.api
+          .clipboardRemove(entry.id)
+          .then((rows) => renderClipboard(rows, el<HTMLInputElement>('clip-q').value.trim()));
+      });
+
+      actions.append(pin, remove);
+      row.append(body, actions);
+      li.append(row);
+      li.addEventListener('click', () => {
+        void window.api.clipboardCopy(entry.id).then((ok) => ok && pulse('Copied'));
+      });
+      return li;
+    })
+  );
+}
+
+async function loadClipboard(query = ''): Promise<void> {
+  const seq = ++clipSearchSeq;
+  const rows = await window.api.clipboardList(query);
+  if (seq !== clipSearchSeq) return;
+  renderClipboard(rows, query);
+}
+
+/* ---------------- shelf ---------------- */
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 ** 2) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 ** 2).toFixed(1)} MB`;
+}
+
+function renderShelf(items: AppShelfItem[]): void {
+  const list = el('shelf-list');
+  const empty = el('shelf-empty');
+
+  if (!items.length) {
+    list.replaceChildren();
+    empty.hidden = false;
+    return;
+  }
+  empty.hidden = true;
+
+  list.replaceChildren(
+    ...items.map((item) => {
+      const li = document.createElement('li');
+      li.className = 'shelf-item';
+      li.draggable = true;
+      li.title = 'Drag out to Finder or another app';
+
+      const icon = document.createElement('span');
+      icon.className = 'icon';
+      icon.innerHTML = ICON_FILE;
+
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = item.name;
+
+      const size = document.createElement('span');
+      size.className = 'size';
+      size.textContent = formatBytes(item.size);
+
+      const remove = document.createElement('button');
+      remove.className = 'mini';
+      remove.type = 'button';
+      remove.title = 'Remove';
+      remove.textContent = '✕';
+      remove.addEventListener('click', (e) => {
+        e.stopPropagation();
+        void window.api.shelfRemove(item.id).then(renderShelf);
+      });
+
+      li.append(icon, name, size, remove);
+      // The HTML5 drag is cancelled immediately: Electron's own startDrag,
+      // fired through main, is what actually hands the OS a real file.
+      li.addEventListener('dragstart', (e) => {
+        e.preventDefault();
+        window.api.shelfStartDrag(item.id);
+      });
+      return li;
+    })
+  );
+}
+
+async function loadShelf(): Promise<void> {
+  renderShelf(await window.api.shelfList());
+}
+
+/* ---------------- timers ---------------- */
+
+let timerKind: AppTimerKind = 'pomodoro';
+
+function fmtClock(totalSeconds: number): string {
+  const s = Math.max(0, Math.round(totalSeconds));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${m}:${String(r).padStart(2, '0')}`;
+}
+
+function renderTimers(state: AppTimersState): void {
+  if (state.active) timerKind = state.active;
+
+  document.querySelectorAll<HTMLButtonElement>('#timer-modes .ghost').forEach((b) => {
+    b.classList.toggle('on', b.dataset.kind === timerKind);
+  });
+
+  const showingActive = state.active === timerKind;
+  const seconds = showingActive
+    ? state.seconds
+    : timerKind === 'countdown'
+      ? state.countdownTotal
+      : timerKind === 'pomodoro'
+        ? 25 * 60
+        : 0;
+  el('timer-time').textContent = fmtClock(seconds);
+
+  const phase = el('timer-phase');
+  phase.hidden = timerKind !== 'pomodoro';
+  phase.textContent = state.pomodoroPhase === 'work' ? 'Work' : 'Break';
+
+  el('timer-presets').hidden = timerKind !== 'countdown';
+  document.querySelectorAll<HTMLButtonElement>('#timer-presets .ghost').forEach((b) => {
+    b.classList.toggle('on', Number(b.dataset.secs) === state.countdownTotal);
+  });
+
+  const toggle = el<HTMLButtonElement>('timer-toggle');
+  const running = showingActive && state.running;
+  toggle.textContent = running ? 'Pause' : 'Start';
+  toggle.classList.toggle('on', running);
+
+  const hydOn = el<HTMLInputElement>('hydration-on');
+  hydOn.checked = state.hydrationEnabled;
+  const mins = el<HTMLInputElement>('hydration-mins');
+  if (document.activeElement !== mins) mins.value = String(state.hydrationMinutes);
+  el('hydration-note').textContent =
+    state.hydrationEnabled && state.hydrationNextAt
+      ? `Next in ${fmtClock((state.hydrationNextAt - Date.now()) / 1000)}`
+      : 'Off';
+}
+
+async function loadTimers(): Promise<void> {
+  renderTimers(await window.api.timersGet());
+}
+
+function bindTimers(): void {
+  document.querySelectorAll<HTMLButtonElement>('#timer-modes .ghost').forEach((b) => {
+    b.addEventListener('click', () => {
+      timerKind = b.dataset.kind as AppTimerKind;
+      void window.api.timersGet().then(renderTimers);
+    });
+  });
+
+  el('timer-toggle').addEventListener('click', () => {
+    void window.api.timersGet().then((s) => {
+      const running = s.active === timerKind && s.running;
+      void (running ? window.api.timersPause() : window.api.timersStart(timerKind)).then(
+        renderTimers
+      );
+    });
+  });
+
+  el('timer-reset').addEventListener('click', () => {
+    void window.api.timersReset(timerKind).then(renderTimers);
+  });
+
+  document.querySelectorAll<HTMLButtonElement>('#timer-presets .ghost').forEach((b) => {
+    b.addEventListener('click', () => {
+      void window.api.timersSetCountdown(Number(b.dataset.secs)).then(renderTimers);
+    });
+  });
+
+  el('hydration-on').addEventListener('change', () => {
+    const on = el<HTMLInputElement>('hydration-on').checked;
+    const mins = Number(el<HTMLInputElement>('hydration-mins').value) || 60;
+    void window.api.timersSetHydration(on, mins).then(renderTimers);
+  });
+
+  let hydrationDebounce: ReturnType<typeof setTimeout> | null = null;
+  el('hydration-mins').addEventListener('input', () => {
+    if (hydrationDebounce) clearTimeout(hydrationDebounce);
+    hydrationDebounce = setTimeout(() => {
+      const mins = Math.max(5, Number(el<HTMLInputElement>('hydration-mins').value) || 60);
+      const on = el<HTMLInputElement>('hydration-on').checked;
+      void window.api.timersSetHydration(on, mins).then(renderTimers);
+    }, 500);
+  });
+
+  window.api.onTimersTick((state) => {
+    if (activeTab === 'timers') renderTimers(state);
+  });
+}
+
+/* ---------------- stats ---------------- */
+
+function setBar(barId: string, valId: string, percent: number | null, label: string): void {
+  el(barId).style.width = percent === null ? '0%' : `${Math.max(0, Math.min(100, percent))}%`;
+  el(valId).textContent = label;
+}
+
+function renderStats(s: AppStatsSnapshot): void {
+  setBar('stat-cpu-bar', 'stat-cpu-val', s.cpuPercent, s.cpuPercent === null ? '—' : `${s.cpuPercent.toFixed(0)}%`);
+  setBar('stat-mem-bar', 'stat-mem-val', s.memPercent, `${s.memPercent.toFixed(0)}%`);
+
+  if (s.disk) setBar('stat-disk-bar', 'stat-disk-val', s.disk.percent, `${s.disk.percent.toFixed(0)}%`);
+  else setBar('stat-disk-bar', 'stat-disk-val', null, 'n/a');
+
+  if (s.battery) {
+    setBar(
+      'stat-batt-bar',
+      'stat-batt-val',
+      s.battery.percent,
+      `${s.battery.percent}%${s.battery.charging ? ' · charging' : ''}`
+    );
+  } else {
+    setBar('stat-batt-bar', 'stat-batt-val', null, 'n/a');
+  }
+
+  el('stat-net-val').textContent = s.network
+    ? `↓ ${formatBytes(s.network.downBytesPerSec)}/s  ↑ ${formatBytes(s.network.upBytesPerSec)}/s`
+    : '—';
+}
+
+/* ---------------- calendar ---------------- */
+
+function fmtEventWhen(ts: number, allDay: boolean): string {
+  if (allDay) return 'All day';
+  return new Date(ts).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+}
+
+function renderCalendar(agenda: AppCalendarAgenda): void {
+  const events = el('cal-events');
+  const reminders = el('cal-reminders');
+  const empty = el('cal-empty');
+
+  if (!agenda.ok) {
+    events.replaceChildren();
+    reminders.replaceChildren();
+    empty.hidden = false;
+    empty.textContent =
+      agenda.error === 'macOS only' ? 'Calendar is macOS only.' : `Couldn't read Calendar: ${agenda.error}`;
+    return;
+  }
+  if (!agenda.events.length && !agenda.reminders.length) {
+    events.replaceChildren();
+    reminders.replaceChildren();
+    empty.hidden = false;
+    empty.textContent = 'Nothing in the next 7 days.';
+    return;
+  }
+  empty.hidden = true;
+
+  events.replaceChildren(
+    ...agenda.events.map((e) => {
+      const li = document.createElement('li');
+      li.className = 'cal-item';
+      const when = document.createElement('span');
+      when.className = 'when';
+      when.textContent = fmtEventWhen(e.start, e.allDay);
+      const title = document.createElement('span');
+      title.className = 'title';
+      title.textContent = e.title;
+      li.append(when, title);
+      return li;
+    })
+  );
+
+  reminders.replaceChildren(
+    ...agenda.reminders.map((r) => {
+      const li = document.createElement('li');
+      li.className = 'cal-item reminder';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.addEventListener('change', () => {
+        li.classList.toggle('done', cb.checked);
+        void window.api.calendarCompleteReminder(r.id).then((ok) => {
+          if (!ok) {
+            cb.checked = false;
+            li.classList.remove('done');
+          }
+        });
+      });
+      const title = document.createElement('span');
+      title.className = 'title';
+      title.textContent = r.title;
+      li.append(cb, title);
+      return li;
+    })
+  );
+}
+
+async function loadCalendar(): Promise<void> {
+  renderCalendar(await window.api.calendarAgenda(7));
+}
+
+/* ---------------- home ---------------- */
+
+/**
+ * No state of its own: everything shown here is already tracked by another
+ * tab (now playing by the strip, the next reminder by the foot bar), so this
+ * just reads those instead of asking main for anything a second time.
+ */
+function renderHome(): void {
+  const nowRow = el('home-now');
+  nowRow.hidden = !playing;
+  el('home-now-track').textContent = playing ? trackLine(playing) : '';
+  el('home-next-val').textContent = el('next').textContent || 'Nothing scheduled';
+}
+
+function bindHome(): void {
+  document.querySelectorAll<HTMLButtonElement>('.home-launch [data-go]').forEach((b) => {
+    b.addEventListener('click', () => setActiveTab(b.dataset.go as TabId));
+  });
+  el('home-open').addEventListener('click', () => void window.api.showWindow());
+}
+
+/* ---------------- scratchpad ---------------- */
+
+function applyScratchState(s: AppScratchpadState): void {
+  const box = el<HTMLTextAreaElement>('scratch-text');
+  // Never stomp on what's mid-keystroke -- a save that lands while typing
+  // would otherwise yank the cursor back to wherever it last saved from.
+  if (document.activeElement !== box) box.value = s.text;
+  el<HTMLInputElement>('scratch-pin').checked = s.pinned;
+  pinnedScratchText = s.pinned && s.text.trim() ? s.text.trim().split('\n')[0].slice(0, 60) : null;
+  renderStrip();
+}
+
+async function loadScratchpad(): Promise<void> {
+  applyScratchState(await window.api.scratchpadGet());
+}
+
+function bindScratchpad(): void {
+  let debounce: ReturnType<typeof setTimeout> | null = null;
+  el('scratch-text').addEventListener('input', () => {
+    if (debounce) clearTimeout(debounce);
+    debounce = setTimeout(() => {
+      void window.api
+        .scratchpadSet(el<HTMLTextAreaElement>('scratch-text').value)
+        .then(applyScratchState);
+    }, 400);
+  });
+  el('scratch-pin').addEventListener('change', () => {
+    void window.api
+      .scratchpadPin(el<HTMLInputElement>('scratch-pin').checked)
+      .then(applyScratchState);
+  });
+}
+
+/* ---------------- notes ---------------- */
+
+let openNoteId: string | null = null;
+let noteSaveDebounce: ReturnType<typeof setTimeout> | null = null;
+
+function renderNotesList(items: AppNoteItem[]): void {
+  const list = el('notes-list');
+  const empty = el('notes-empty');
+  const main = el('notes-main');
+
+  if (openNoteId && !items.some((n) => n.id === openNoteId)) openNoteId = null;
+  if (!openNoteId && items.length) openNoteId = items[0].id;
+
+  empty.hidden = items.length > 0;
+  main.hidden = items.length === 0;
+
+  list.replaceChildren(
+    ...items.map((n) => {
+      const li = document.createElement('li');
+      li.className = `note-item${n.id === openNoteId ? ' on' : ''}`;
+      const title = document.createElement('div');
+      title.className = 'title';
+      title.textContent = n.title || 'Untitled';
+      const snippet = document.createElement('div');
+      snippet.className = 'snippet';
+      snippet.textContent = n.body.split('\n')[0];
+      li.append(title, snippet);
+      li.addEventListener('click', () => {
+        openNoteId = n.id;
+        renderNotesList(items);
+        openNote(n);
+      });
+      return li;
+    })
+  );
+
+  const current = items.find((n) => n.id === openNoteId);
+  if (current && document.activeElement !== el('note-title') && document.activeElement !== el('note-body')) {
+    openNote(current);
+  }
+}
+
+function openNote(n: AppNoteItem): void {
+  el<HTMLInputElement>('note-title').value = n.title;
+  el<HTMLTextAreaElement>('note-body').value = n.body;
+}
+
+async function loadNotes(): Promise<void> {
+  renderNotesList(await window.api.notesList());
+}
+
+function bindNotes(): void {
+  el('note-new').addEventListener('click', () => {
+    void window.api.notesCreate().then((items) => {
+      openNoteId = items[0]?.id ?? null;
+      renderNotesList(items);
+    });
+  });
+
+  const saveOpenNote = (): void => {
+    if (!openNoteId) return;
+    if (noteSaveDebounce) clearTimeout(noteSaveDebounce);
+    noteSaveDebounce = setTimeout(() => {
+      if (!openNoteId) return;
+      void window.api
+        .notesUpdate(openNoteId, {
+          title: el<HTMLInputElement>('note-title').value,
+          body: el<HTMLTextAreaElement>('note-body').value,
+        })
+        // renderNotesList only repaints the editor from fresh data when
+        // neither of its fields has focus, so this is safe to call while
+        // still typing -- it refreshes the sidebar without touching the cursor.
+        .then((items) => renderNotesList(items));
+    }, 350);
+  };
+
+  el('note-title').addEventListener('input', saveOpenNote);
+  el('note-body').addEventListener('input', saveOpenNote);
+
+  el('note-delete').addEventListener('click', () => {
+    if (!openNoteId) return;
+    const id = openNoteId;
+    openNoteId = null;
+    void window.api.notesRemove(id).then(renderNotesList);
+  });
+}
+
+/* ---------------- weather ---------------- */
+
+/** WMO weather codes, collapsed to the handful of labels worth showing. */
+function wxLabel(code: number): string {
+  if (code === 0) return 'Clear sky';
+  if (code <= 2) return 'Partly cloudy';
+  if (code === 3) return 'Overcast';
+  if (code === 45 || code === 48) return 'Fog';
+  if (code >= 51 && code <= 57) return 'Drizzle';
+  if (code >= 61 && code <= 67) return 'Rain';
+  if (code >= 71 && code <= 77) return 'Snow';
+  if (code >= 80 && code <= 82) return 'Rain showers';
+  if (code === 85 || code === 86) return 'Snow showers';
+  if (code >= 95) return 'Thunderstorm';
+  return 'Unknown';
+}
+
+function renderWeather(w: AppWeatherSnapshot): void {
+  const days = el('wx-days');
+  const empty = el('wx-empty');
+
+  if (!w.location) {
+    el('wx-temp').textContent = '—';
+    el('wx-cond').textContent = 'Set a location';
+    el('wx-loc').textContent = '';
+    days.replaceChildren();
+    empty.hidden = false;
+    empty.textContent = 'Type a city above and hit Set.';
+    return;
+  }
+
+  el('wx-loc').textContent = w.location.name;
+
+  if (!w.ok && !w.current) {
+    el('wx-temp').textContent = '—';
+    el('wx-cond').textContent = "Couldn't load";
+    days.replaceChildren();
+    empty.hidden = false;
+    empty.textContent = w.error ?? 'Something went wrong.';
+    return;
+  }
+  empty.hidden = true;
+
+  el('wx-temp').textContent = w.current ? `${Math.round(w.current.temp)}°` : '—';
+  el('wx-cond').textContent = w.current ? wxLabel(w.current.code) : '';
+
+  days.replaceChildren(
+    ...w.daily.map((day) => {
+      const li = document.createElement('li');
+      li.className = 'wx-day';
+      const d = document.createElement('span');
+      d.className = 'd';
+      d.textContent = new Date(day.date).toLocaleDateString([], { weekday: 'short' });
+      const c = document.createElement('span');
+      c.className = 'c';
+      c.textContent = wxLabel(day.code);
+      const t = document.createElement('span');
+      t.className = 't';
+      t.textContent = `${Math.round(day.max)}° / ${Math.round(day.min)}°`;
+      li.append(d, c, t);
+      return li;
+    })
+  );
+}
+
+async function loadWeather(): Promise<void> {
+  renderWeather(await window.api.weatherGet());
+}
+
+function bindWeather(): void {
+  el('wx-set').addEventListener('click', () => {
+    const q = el<HTMLInputElement>('wx-q').value.trim();
+    if (!q) return;
+    void window.api.weatherSetLocation(q).then(renderWeather);
+  });
+  el('wx-q').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') el('wx-set').click();
+  });
+}
+
+/* ---------------- message ---------------- */
+
+function bindMessage(): void {
+  const run = (): void => {
+    const text = el<HTMLInputElement>('msg-text').value.trim();
+    if (!text) return;
+    void window.api.runMessage(text);
+    el<HTMLInputElement>('msg-text').value = '';
+  };
+  el('msg-run').addEventListener('click', run);
+  el('msg-text').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') run();
+  });
+}
+
+/* ---------------- tab switching ---------------- */
+
+/** What has to happen once, the moment a tab becomes visible. */
+function onTabShown(tab: TabId): void {
+  if (tab === 'home') renderHome();
+  else if (tab === 'clipboard') void loadClipboard();
+  else if (tab === 'shelf') void loadShelf();
+  else if (tab === 'notes') void loadNotes();
+  else if (tab === 'scratchpad') void loadScratchpad();
+  else if (tab === 'timers') void loadTimers();
+  else if (tab === 'stats') void window.api.statsSubscribe().then(renderStats);
+  else if (tab === 'calendar') void loadCalendar();
+  else if (tab === 'weather') void loadWeather();
+}
+
+/** Stats sampling costs a handful of external commands per tick, so it only
+ *  runs while its tab is actually the one showing. */
+function onTabHidden(tab: TabId): void {
+  if (tab === 'stats') void window.api.statsUnsubscribe();
+}
+
+function setActiveTab(tab: TabId): void {
+  if (activeTab === tab) return;
+  onTabHidden(activeTab);
+  activeTab = tab;
+  for (const id of TAB_IDS) el(`view-${id}`).hidden = id !== tab;
+  document
+    .querySelectorAll<HTMLButtonElement>('.rail-btn')
+    .forEach((b) => b.classList.toggle('on', b.dataset.tab === tab));
+  onTabShown(tab);
+}
+
 /* ---------------- expand / collapse ---------------- */
 
 function setExpanded(on: boolean): void {
   document.body.classList.toggle('expanded', on);
   applyShape();
   if (on) {
-    el('q').focus();
+    if (activeTab === 'search') el('q').focus();
+    else onTabShown(activeTab); // refreshes data and, for stats, resubscribes
   } else {
     const q = el<HTMLInputElement>('q');
     q.value = '';
     q.blur();
     renderNotchHits([], '');
+    // Sampling stats costs real work per tick; never leave it running behind
+    // a closed panel just because Stats happened to be the tab left open.
+    if (activeTab === 'stats') void window.api.statsUnsubscribe();
   }
 }
 
@@ -210,18 +870,32 @@ function trackLine(np: AppNowPlaying): string {
 }
 
 /**
- * The single place that decides what the closed strip shows, so the two
- * things that can claim it cannot end up half-applied between them.
- *
- * It grows sideways on the notch's own line rather than downward, so it
- * never covers anything that was not already the notch.
+ * The single place that decides what the closed strip shows, so the four
+ * things that can claim it cannot end up half-applied between them. In
+ * priority order: a transient system pulse, a message run on purpose, what
+ * is playing, and last, a scratchpad someone chose to pin. Each one only
+ * shows if nothing higher is currently true.
  */
 function renderStrip(): void {
   const body = document.body;
-  body.classList.toggle('pulsing', pulseLabel !== null);
-  body.classList.toggle('playing', pulseLabel === null && playing !== null);
+  const pulsing = pulseLabel !== null;
+  const messaging = !pulsing && messageLabel !== null;
+  const showPlaying = !pulsing && !messaging && playing !== null;
+  const showScratch = !pulsing && !messaging && !showPlaying && pinnedScratchText !== null;
 
-  el('lip-text').textContent = pulseLabel ?? (playing ? trackLine(playing) : '');
+  body.classList.toggle('pulsing', pulsing);
+  body.classList.toggle('messaging', messaging);
+  body.classList.toggle('playing', showPlaying || showScratch);
+
+  el('lip-text').textContent = pulsing
+    ? pulseLabel!
+    : messaging
+      ? messageLabel!
+      : showPlaying
+        ? trackLine(playing!)
+        : showScratch
+          ? pinnedScratchText!
+          : '';
   applyShape();
 }
 
@@ -234,6 +908,18 @@ function pulse(label: string): void {
     // Back to whatever was underneath, which is usually nothing.
     renderStrip();
   }, 2200);
+}
+
+/** Runs a message across the collapsed strip for exactly the duration main computed. */
+function showMessage(text: string, durationMs: number): void {
+  messageLabel = text;
+  document.documentElement.style.setProperty('--marquee-duration', `${durationMs}ms`);
+  renderStrip();
+  if (messageTimer) clearTimeout(messageTimer);
+  messageTimer = setTimeout(() => {
+    messageLabel = null;
+    renderStrip();
+  }, durationMs);
 }
 
 /* ---------------- drop to remember ---------------- */
@@ -264,7 +950,14 @@ function bindNotchDrop(): void {
       // The renderer is sandboxed, so a File has no usable path; the preload
       // resolves it through webUtils and the main process reads it.
       const paths = files.map((f) => window.api.pathForFile(f)).filter(Boolean);
-      void window.api.rememberFiles(paths).then((n) => pulse(`${n} remembered`));
+      if (activeTab === 'shelf') {
+        void window.api.shelfAdd(paths).then((items) => {
+          renderShelf(items);
+          pulse(`${paths.length > 1 ? paths.length + ' files' : 'File'} shelved`);
+        });
+      } else {
+        void window.api.rememberFiles(paths).then((n) => pulse(`${n} remembered`));
+      }
       return;
     }
 
@@ -303,6 +996,30 @@ function bindNotch(): void {
 
   bindNotchDrop();
 
+  document.querySelectorAll<HTMLButtonElement>('#rail .rail-btn').forEach((b) => {
+    b.addEventListener('click', () => setActiveTab(b.dataset.tab as TabId));
+  });
+
+  let clipDebounce: ReturnType<typeof setTimeout> | null = null;
+  el('clip-q').addEventListener('input', () => {
+    if (clipDebounce) clearTimeout(clipDebounce);
+    clipDebounce = setTimeout(() => void loadClipboard(el<HTMLInputElement>('clip-q').value.trim()), 150);
+  });
+  el('clip-clear').addEventListener('click', () => {
+    void window.api.clipboardClear().then((rows) => renderClipboard(rows, ''));
+  });
+
+  el('cal-refresh').addEventListener('click', () => void loadCalendar());
+
+  bindTimers();
+  bindHome();
+  bindScratchpad();
+  bindNotes();
+  bindWeather();
+  bindMessage();
+
+  window.api.onNotchMessage(({ text, durationMs }) => showMessage(text, durationMs));
+
   window.api.onNotchGeometry((g) => {
     geom = g;
     const root = document.documentElement;
@@ -313,6 +1030,9 @@ function bindNotch(): void {
   window.api.onNotchExpanded((on) => setExpanded(on));
   window.api.onNotchPulse((label) => pulse(label));
   window.api.onState((s) => paint(s));
+  window.api.onStatsTick((s) => {
+    if (activeTab === 'stats') renderStats(s);
+  });
 }
 
 void (async function init(): Promise<void> {
@@ -322,4 +1042,8 @@ void (async function init(): Promise<void> {
   // rectangle collapsing into a notch.
   applyShape();
   paint(await window.api.getState());
+  // A pinned scratchpad has to show on the strip from launch, not only after
+  // the Scratchpad tab has been opened once this session.
+  void loadScratchpad();
+  renderHome();
 })();
