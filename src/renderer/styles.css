@@ -76,6 +76,9 @@ h1 {
 .tab {
   -webkit-app-region: no-drag;
   appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   border: 0;
   background: transparent;
   color: var(--text-secondary);
@@ -85,16 +88,42 @@ h1 {
   padding: 6px 15px;
   border-radius: var(--radius-full);
   cursor: pointer;
-  transition: background 0.14s ease, color 0.14s ease;
+  transition: background 0.14s ease, color 0.14s ease, transform 0.1s ease;
 }
 .tab:hover { color: var(--text); background: var(--surface-secondary); }
+.tab:active { transform: scale(0.96); }
 .tab.is-active { color: var(--paper); background: var(--ink); }
+
+/* currentColor, so a tab's icon switches with it automatically -- no
+   separate active/inactive rule needed. */
+.tab-icon {
+  width: 15px;
+  height: 15px;
+  flex: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 
 /* ---------------- layout ---------------- */
 
 main { padding: 22px 20px 40px; max-width: 780px; margin: 0 auto; }
 .panel { display: none; }
-.panel.is-active { display: block; }
+.panel.is-active {
+  display: block;
+  /* A hard cut between tabs reads as a page reload; a short settle makes
+     switching feel like the same window rearranging itself. */
+  animation: panel-in 0.16s ease-out;
+}
+@keyframes panel-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .panel.is-active { animation: none; }
+}
 
 .panel-head {
   display: flex;
