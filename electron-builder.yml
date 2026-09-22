@@ -17,6 +17,12 @@ files:
   - "!**/*.map"
   # Shipped through extraResources instead, see below.
   - "!out/mcp/**"
+  # 135MB of WebAssembly for a backend this app never reaches. transformers
+  # picks onnxruntime-node here and requires it by name; the web runtime is
+  # already inlined into transformers' own dist, and the .wasm files it would
+  # want are fetched from a CDN rather than from this package. Verified by
+  # deleting it and embedding: 384 dims, unchanged.
+  - "!node_modules/onnxruntime-web/**"
   # onnxruntime ships ~289MB of prebuilts for every platform at once. The
   # afterPack hook drops the ones this build does not need; it cannot be done
   # here, because a platform-level `files` list replaces this one rather than

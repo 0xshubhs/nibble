@@ -14,11 +14,20 @@
     <!-- One silhouette, clipped to a notch-shaped path that grows.
          Everything below is laid out at full size the whole time and simply
          revealed by the shape, so opening never has to lay anything out. -->
+    <!-- Sits behind the silhouette, clipped one point larger, so the point
+         of it that shows past the black is a hairline along the contour. -->
+    <div class="shell-edge" id="shell-edge"></div>
+
     <div class="shell" id="shell">
       <!-- Level with the menu bar: the only row that exists while closed. -->
       <div class="strip">
-        <span class="dot"></span>
-        <span class="strip-text" id="lip-text"></span>
+        <!-- Shrink-wrapped to its contents, because the island is sized to
+             fit this rather than to a fixed width. -->
+        <div class="strip-inner">
+          <img class="art" id="art" alt="" hidden />
+          <span class="dot" id="dot"></span>
+          <span class="strip-text" id="lip-text"></span>
+        </div>
       </div>
 
       <div class="panel" id="panel">
@@ -124,10 +133,6 @@
 
           <div class="content">
             <div class="view" id="view-home">
-              <div class="home-now" id="home-now" hidden>
-                <span class="home-eyebrow">Now playing</span>
-                <span class="home-value" id="home-now-track"></span>
-              </div>
               <div class="home-next">
                 <span class="home-eyebrow">Next up</span>
                 <span class="home-value" id="home-next-val">Nothing scheduled</span>
@@ -152,7 +157,6 @@
               </div>
               <ul class="hits" id="hits"></ul>
               <p class="empty" id="empty">Drop text or a file here to remember it.</p>
-              <p class="now" id="now" hidden></p>
             </div>
 
             <div class="view" id="view-clipboard" hidden>
@@ -311,6 +315,20 @@
               </div>
             </div>
           </div>
+        </div>
+
+        <!-- ------------------------------------------------------------
+             now playing, always visible above the foot regardless of
+             which tab is open -- the strip can only afford one line, so
+             this is the first chance to say properly what is on.
+             ------------------------------------------------------------ -->
+        <div class="np" id="now" hidden>
+          <img class="np-art" id="np-art" alt="" />
+          <span class="np-meta">
+            <span class="np-title" id="np-title"></span>
+            <span class="np-sub" id="np-sub"></span>
+          </span>
+          <span class="np-eq" aria-hidden="true"><i></i><i></i><i></i></span>
         </div>
 
         <div class="foot">

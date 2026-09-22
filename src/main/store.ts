@@ -36,7 +36,8 @@ export const DEFAULTS: StoreData = {
 
     // --- notch panel ---
     notchEnabled: false,
-    notchWidth: 200,
+    // Zero means measure it. See NotchPanel.notchWidth().
+    notchWidth: 0,
   },
 };
 
@@ -61,9 +62,18 @@ export class Store extends EventEmitter<StoreEvents> {
   private read(): StoreData {
     try {
       const raw = JSON.parse(fs.readFileSync(this.file, 'utf8')) as Partial<StoreData>;
+      const settings = { ...DEFAULTS.settings, ...(raw.settings ?? {}) };
+
+      // 200 was the old hardcoded notch width, and there has never been a
+      // control that could set it, so a stored 200 is the previous default
+      // rather than anybody's choice. Left alone it would go on overriding a
+      // measurement that is better than it -- on a 14" M3 the real width is
+      // 165pt, and 200 stands ~17pt proud of the hardware either side.
+      if (settings.notchWidth === 200) settings.notchWidth = 0;
+
       return {
         reminders: Array.isArray(raw.reminders) ? raw.reminders : [],
-        settings: { ...DEFAULTS.settings, ...(raw.settings ?? {}) },
+        settings,
       };
     } catch {
       return structuredClone(DEFAULTS);

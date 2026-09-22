@@ -9,9 +9,10 @@
 
    Colours come from tokens.css, so the panel follows the system's
    light/dark appearance like the rest of the app. Only the strip
-   (the sliver level with the menu bar, visible while collapsed)
-   stays literal black -- that's the part actually overlapping the
-   physical notch, and it must read as part of it in both themes.
+   (the sliver level with the menu bar, visible while collapsed or
+   resting as an island) stays literal black -- that's the part
+   actually overlapping the physical notch, and it must read as part
+   of it in both themes.
    ============================================================ */
 
 * { box-sizing: border-box; }
@@ -45,25 +46,63 @@ html, body {
   position: absolute;
   inset: 0;
   background: #000;
-  opacity: 0;
-  /* Closing is the default; opening overrides it below. Collapsing is
-     quicker and has no overshoot in it, because a panel that bounces on
-     its way out reads as a mistake rather than as a flourish. */
+  /* Idle is visible now, not hidden. Collapsed the silhouette is a little
+     wider than the physical notch, so what the user sees is the notch having
+     grown a few points either side -- the only cue that the panel is there
+     at all before anything has happened. */
+  opacity: 1;
+  /* The duration is set from the script, once per move. Opening and closing
+     are each two moves -- down then out, in then up -- and they are not the
+     same length, so a fixed duration here would have to be wrong for one of
+     them. The curve stays put: it decelerates hard and does not overshoot,
+     which is what keeps the two moves reading as one gesture. */
   transition:
-    clip-path 400ms cubic-bezier(0.32, 0.72, 0, 1),
+    clip-path var(--morph-ms, 400ms) cubic-bezier(0.32, 0.72, 0, 1),
     opacity 120ms ease-out;
   will-change: clip-path, opacity;
 }
 
-/* Anything that makes the panel visible: open, or saying something. */
-body.expanded .shell,
-body.pulsing .shell,
-body.playing .shell { opacity: 1; }
+/* The hairline.
 
-body.expanded .shell {
+   A filter cannot draw this: CSS applies filters before clip-path, so a
+   drop-shadow on the silhouette would be outlined and then clipped away.
+   Instead this is a second silhouette one point larger in every direction
+   sitting behind the black one; the point of it that is not covered is the
+   line. It morphs on the same curve, or the outline would lag the shape. */
+/* Registered, rather than a plain custom property, so the fill can be
+   transitioned. An unregistered --progress is just a string to the engine
+   and snaps from one value to the next; declaring its syntax is what lets
+   it interpolate. */
+@property --progress {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 0%;
+}
+
+.shell-edge {
+  position: absolute;
+  inset: 0;
+  /* The hairline doubles as the progress track. Left of the stop is work
+     done, right of it is the resting line at the alpha it has always been,
+     so an idle panel looks exactly as it did before any of this. */
+  background: linear-gradient(
+    to right,
+    rgba(255, 255, 255, 0.85) 0 var(--progress, 0%),
+    rgba(255, 255, 255, 0.22) var(--progress, 0%) 100%
+  );
   transition:
-    clip-path 520ms cubic-bezier(0.22, 1, 0.36, 1),
-    opacity 100ms ease-out;
+    clip-path var(--morph-ms, 400ms) cubic-bezier(0.32, 0.72, 0, 1),
+    --progress 320ms linear;
+  will-change: clip-path;
+}
+
+/* Filling is the whole message while it lasts, so the dot stops competing
+   with it -- and there is no icon, because this is the app talking. */
+body.busy .dot { opacity: 1; }
+body.busy .strip-text {
+  opacity: 1;
+  max-width: 230px;
+  font-weight: 500;
 }
 
 /* ------------------------------------------------------------
@@ -76,10 +115,45 @@ body.expanded .shell {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
   /* Room for the flare, so a wing's text never sits under the curve. */
   padding: 0 18px;
 }
+
+/* Shrink-wrapped, so its width is the width the island has to be. */
+.strip-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: max-content;
+  max-width: 100%;
+}
+
+/* The source's icon: what is making the noise, as a circle.
+
+   Sized in ems off the strip's own font so it tracks the menu bar rather
+   than a fixed guess, and clipped to a circle because every app icon is
+   already a rounded square -- a second rounded square inside the island
+   reads as a tile, a circle reads as a badge. */
+.art {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: none;
+  opacity: 0;
+  transform: scale(0.7);
+  transition:
+    opacity 220ms ease-out 140ms,
+    transform 320ms cubic-bezier(0.22, 1, 0.36, 1) 140ms;
+}
+
+body.playing .art[src] {
+  opacity: 1;
+  transform: none;
+}
+
+/* The dot is the fallback badge. With an icon there is no reason for both. */
+body.has-art .dot { display: none; }
 
 .dot {
   width: 6px;
@@ -140,7 +214,9 @@ body.messaging .strip-text {
   to { transform: translateX(-100%); }
 }
 
-/* Expanding cancels whatever the strip was saying, immediately. */
+/* Expanding cancels whatever the strip was saying, immediately. The icon
+   goes with it: inside the panel it is drawn again, larger. */
+body.expanded .art,
 body.expanded .dot,
 body.expanded .strip-text {
   opacity: 0;
@@ -177,11 +253,12 @@ body.expanded .panel {
   opacity: 1;
   transform: none;
   pointer-events: auto;
-  /* The reveal trails the shape slightly and is plainer than it: the
-     spring settles, the content simply arrives. */
+  /* The reveal waits for the drop to finish and rides the widening, which
+     is the move that actually makes room for it. Fading in during the drop
+     would show the content being sliced by a notch-width clip. */
   transition:
-    opacity 300ms ease-out 30ms,
-    transform 520ms cubic-bezier(0.22, 1, 0.36, 1);
+    opacity 260ms ease-out 260ms,
+    transform 340ms cubic-bezier(0.22, 1, 0.36, 1) 260ms;
 }
 
 /* ------------------------------------------------------------
@@ -340,14 +417,95 @@ input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
   font-size: 12px;
 }
 
-/* What is playing, inside the open panel, where there is room for it. */
-.now {
-  margin: 10px 0 0;
-  font-size: 11.5px;
-  color: var(--text-secondary);
+/* ------------------------------------------------------------
+   now playing, inside the panel
+
+   The strip can only afford one line, so opening the panel is the first
+   chance to say properly what is on: the icon at a size you can actually
+   recognise, the title and the artist on their own lines, and a meter that
+   makes it obvious this is live rather than the last thing you played.
+   This sits above the foot rather than inside any one tab, because it is
+   ambient information like the next reminder, not tab-specific content.
+   ------------------------------------------------------------ */
+
+.np {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-card);
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-soft);
+}
+
+.np-art {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: none;
+  background: var(--surface-hover);
+}
+
+.np-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
+.np-title,
+.np-sub {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.np-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.np-sub {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* The meter. Three bars on staggered loops -- not synced to anything, since
+   nothing here can hear the audio, but neither is any other player's. */
+.np-eq {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 14px;
+  margin-left: auto;
+  flex: none;
+}
+
+.np-eq i {
+  width: 3px;
+  border-radius: 1.5px;
+  background: var(--text-tertiary);
+  animation: eq 900ms ease-in-out infinite;
+  transform-origin: bottom;
+}
+
+.np-eq i:nth-child(1) { height: 60%; animation-delay: -200ms; }
+.np-eq i:nth-child(2) { height: 100%; animation-delay: -600ms; }
+.np-eq i:nth-child(3) { height: 45%; animation-delay: -400ms; }
+
+@keyframes eq {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+
+/* Anything that loops forever has to be able to be turned off. */
+@media (prefers-reduced-motion: reduce) {
+  .np-eq i { animation: none; transform: scaleY(0.7); }
+  .dot { animation: none !important; }
+  .strip-text { animation: none !important; }
 }
 
 /* ------------------------------------------------------------
@@ -607,10 +765,11 @@ input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
 
 /* ------------------------------------------------------------
    home: a landing tab composed from what the other tools already
-   know, plus a launcher -- no state of its own.
+   know, plus a launcher -- no state of its own. Now playing lives
+   in the shared .np card above the foot instead of being repeated
+   here.
    ------------------------------------------------------------ */
 
-.home-now,
 .home-next {
   display: flex;
   flex-direction: column;

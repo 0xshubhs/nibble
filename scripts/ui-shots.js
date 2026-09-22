@@ -162,12 +162,53 @@ const related = [
 
 /* ---------------- the harness ---------------- */
 
+/**
+ * A real app icon, so the circle in the strip is drawn against the thing it
+ * will actually be drawn against. Falls back to nothing, which is also a
+ * case worth being able to see: every platform but macOS is in it.
+ */
+function someAppIcon() {
+  if (platform !== 'darwin' || process.platform !== 'darwin') return '';
+  try {
+    const { iconForSync } = require(path.join(ROOT, 'out', 'main', 'appicon.js'));
+    for (const b of [
+      '/Applications/Brave Browser.app',
+      '/Applications/Google Chrome.app',
+      '/Applications/Firefox.app',
+      '/Applications/Safari.app',
+    ]) {
+      if (!fs.existsSync(b)) continue;
+      const icon = iconForSync(b);
+      if (icon) return icon;
+    }
+  } catch {
+    // out/ has not been built, or the bundle has no icon to give.
+  }
+  return '';
+}
+
+const ICON = someAppIcon();
+
 const nowPlaying = {
   title: 'Why Rank Fusion Works',
   artist: 'Some Channel',
   album: '',
   url: 'https://www.youtube.com/watch?v=abc123',
   app: 'Brave',
+  icon: ICON,
+};
+
+/**
+ * What macOS can say about a browser: which app is making the noise, and
+ * nothing else. The strip has to be legible with no title at all.
+ */
+const nowPlayingApp = {
+  title: '',
+  artist: '',
+  album: '',
+  url: '',
+  app: 'Brave',
+  icon: ICON,
 };
 
 const nothing = '() => Promise.resolve(null)';
@@ -175,9 +216,23 @@ const bridge = `<script>
 const SNAPSHOT = ${JSON.stringify(snapshot)};
 // ?playing=1 puts a track on the media source, the way the source itself
 // reports one: live, before anything has been captured.
-if (new URLSearchParams(location.search).get('playing')) {
+const q = new URLSearchParams(location.search);
+if (q.get('playing')) {
   SNAPSHOT.memory.sources.find((s) => s.id === 'media').state.nowPlaying =
     ${JSON.stringify(nowPlaying)};
+}
+// ?browser=1 is the same thing with no title: a tab is playing and macOS
+// will not say what.
+if (q.get('browser')) {
+  SNAPSHOT.memory.sources.find((s) => s.id === 'media').state.nowPlaying =
+    ${JSON.stringify(nowPlayingApp)};
+}
+// ?busy=N puts the embedder partway through a model download, which is the
+// one state a first run spends real time in.
+const busyPct = q.get('busy');
+if (busyPct) {
+  SNAPSHOT.memory.stats.embedder.status = 'downloading';
+  SNAPSHOT.memory.stats.embedder.progress = Number(busyPct);
 }
 window.api = {
   getState: () => Promise.resolve(SNAPSHOT),
@@ -227,6 +282,15 @@ const driver = `<script>
     const s = document.getElementById('shell');
     if (s) { s.style.opacity = '1'; s.style.transition = 'none'; }
   }
+  // Headless virtual time does not reliably carry a transition that has a
+  // delay on it to its end, and the strip's text has a 180ms one -- which
+  // produced screenshots of an island with its label still at opacity 0.
+  // Every notch shot wants the settled state, so they all ask for this.
+  if (q.get('still')) {
+    const css = document.createElement('style');
+    css.textContent = '*,*::before,*::after{transition:none!important;animation:none!important}';
+    document.head.appendChild(css);
+  }
   if (typeof applyShape === 'function') applyShape();
   // Anything that needs data has to wait for it.
   if (q.get('related')) setTimeout(() => {
@@ -262,14 +326,27 @@ console.log(`  harnesses written to ${path.relative(ROOT, RENDERER)}/`);
 
 /* ---------------- the screenshots ---------------- */
 
-const CHROME = ['google-chrome', 'chromium', 'chromium-browser', 'brave-browser'].find((bin) => {
-  try {
-    execFileSync('which', [bin], { stdio: 'ignore' });
-    return true;
-  } catch {
-    return false;
-  }
-});
+/**
+ * A Chromium to render with.
+ *
+ * The PATH names are the Linux packages; on macOS nothing installs a binary
+ * on the PATH, so the bundles have to be looked for where they actually are.
+ */
+const CHROME = [
+  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+  '/Applications/Chromium.app/Contents/MacOS/Chromium',
+  '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+]
+  .find((p) => fs.existsSync(p))
+  ?? ['google-chrome', 'chromium', 'chromium-browser', 'brave-browser'].find((bin) => {
+    try {
+      execFileSync('which', [bin], { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  });
 
 if (!CHROME) {
   console.log('  no chromium found; open the harnesses in a browser instead');
@@ -282,10 +359,12 @@ const shots = [
   ['window-reminders', windowPage, '', '900,700'],
   ['window-memory', windowPage, '?tab=memory&related=1', '900,1000'],
   ['window-settings', windowPage, '?tab=settings', '900,820'],
-  ['notch-collapsed', notchPage, '?ghost=1', '500,140'],
-  ['notch-island', notchPage, '?pulsing=1', '500,140'],
-  ['notch-playing', notchPage, '?playing=1', '500,140'],
-  ['notch-expanded', notchPage, '?expanded=1&playing=1', '500,320'],
+  ['notch-collapsed', notchPage, '?ghost=1&still=1', '500,140'],
+  ['notch-island', notchPage, '?pulsing=1&still=1', '500,140'],
+  ['notch-playing', notchPage, '?playing=1&still=1', '500,140'],
+  ['notch-browser', notchPage, '?browser=1&still=1', '500,140'],
+  ['notch-busy', notchPage, '?busy=38&still=1', '500,140'],
+  ['notch-expanded', notchPage, '?expanded=1&playing=1&still=1', '500,320'],
 ];
 
 for (const [name, page, query, size] of shots) {
@@ -297,7 +376,11 @@ for (const [name, page, query, size] of shots) {
         '--headless=new',
         '--disable-gpu',
         '--hide-scrollbars',
-        '--virtual-time-budget=5000',
+        // Generous on purpose. The strip's text fades in on a 180ms delay
+        // and the island is sized from it, and at 5000 that landed before
+        // the transition had finished often enough to produce a screenshot
+        // of an island with no label in it.
+        '--virtual-time-budget=15000',
         `--window-size=${size}`,
         `--screenshot=${file}`,
         `file://${page}${query}`,

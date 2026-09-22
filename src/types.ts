@@ -76,6 +76,11 @@ export interface Settings {
    * only through NSScreen.safeAreaInsets, which Electron does not surface, so
    * this is a sane default the user can nudge.
    */
+  /**
+   * How wide to treat the notch as, in points. Zero means ask the OS, which
+   * is almost always better than a number typed in here: the width changes
+   * with the display's scaling mode, so there is no constant to hardcode.
+   */
   notchWidth: number;
 }
 
@@ -221,6 +226,12 @@ export interface NowPlaying {
   url: string;
   /** The player it came from, e.g. Spotify or Brave. */
   app: string;
+  /**
+   * That player's icon as a PNG data URL, for the circle in the notch.
+   * Empty when the platform cannot produce one, which is every platform
+   * except macOS, and any bundle that ships no .icns.
+   */
+  icon?: string;
 }
 
 export interface SourceInstanceState {
