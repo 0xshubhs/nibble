@@ -7,8 +7,9 @@ import { Logo } from './Logo';
 import { LATEST } from '@/lib/site';
 
 const LINKS = [
+  { href: '/#features', label: 'Features' },
+  { href: '/#pricing', label: 'Pricing' },
   { href: '/docs/', label: 'Docs' },
-  { href: '/docs/how-it-works/', label: 'How it works', optional: true },
   { href: '/docs/connector/', label: 'Connect', optional: true },
   { href: '/faq/', label: 'FAQ' },
   { href: '/download/', label: 'Download' },
@@ -59,7 +60,7 @@ export function Nav() {
             // /docs/ is the prefix of every docs page, so it only lights up on
             // an exact match; the deeper links own their own subtree.
             const active =
-              l.href === '/docs/' ? pathname === '/docs' || pathname === '/docs/' : pathname?.startsWith(l.href.replace(/\/$/, ''));
+              l.href === '/docs/' ? pathname === '/docs' || pathname === '/docs/' : l.href.startsWith('/#') ? false : pathname?.startsWith(l.href.replace(/\/$/, ''));
             return (
               <Link
                 key={l.href}

@@ -878,6 +878,52 @@ details[open] summary::after { transform: rotate(-135deg) translate(-2px, -2px);
 details .answer { padding-bottom: 20px; color: var(--text-secondary); font-size: 0.95rem; }
 
 /* ============================================================
+   pricing
+   ============================================================ */
+
+.pricing-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  align-items: stretch;
+}
+
+.price-card {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  background: var(--surface);
+  border: var(--line) solid var(--ink);
+  border-radius: var(--radius-card);
+  padding: 30px 28px;
+}
+.price-card.is-solid {
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow: var(--shadow-lg);
+}
+.price-card.is-solid .price-note,
+.price-card.is-solid .price-item { color: var(--paper); opacity: 0.86; }
+.price-card.is-solid .price-item svg { color: var(--paper); }
+.price-card.is-solid .btn-outline { border-color: var(--paper); color: var(--paper); }
+.price-card.is-solid .btn-outline:hover { background: rgba(255, 255, 255, 0.14); }
+
+.price-head { display: flex; flex-direction: column; gap: 6px; }
+.price-amount { display: flex; align-items: baseline; gap: 6px; font-weight: 900; font-size: 2.4rem; letter-spacing: -0.03em; }
+.price-amount span { font-size: 0.95rem; font-weight: 700; opacity: 0.7; }
+.price-note { color: var(--text-secondary); font-size: 0.9rem; }
+
+.price-list { display: flex; flex-direction: column; gap: 11px; margin: 4px 0; }
+.price-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 0.92rem;
+  color: var(--text-secondary);
+}
+.price-item svg { width: 17px; height: 17px; flex: none; margin-top: 1px; color: var(--ink); }
+
+/* ============================================================
    cta
    ============================================================ */
 

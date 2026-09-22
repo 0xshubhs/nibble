@@ -26,6 +26,7 @@ export function Footer() {
         <div className="footer-col">
           <h4>Get it</h4>
           <Link href="/download/">Download</Link>
+          <Link href="/#pricing">Pricing</Link>
           <a href={RELEASES}>Releases</a>
           <a href={`${REPO}/blob/main/LICENSE`}>MIT License</a>
         </div>

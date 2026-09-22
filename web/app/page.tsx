@@ -49,6 +49,39 @@ const FEATURES = [
   },
 ];
 
+const CHECK = icon(<path d="M5 12.5 9.5 17 19 7" />);
+
+const PLANS = [
+  {
+    name: 'Self-hosted',
+    price: '$0',
+    per: 'forever',
+    note: 'The default, and the whole product.',
+    items: [
+      'Every feature: capture, search, reminders, the MCP connector',
+      'On-device embedding model, downloaded once',
+      'No account, no server, nothing uploaded',
+      'MIT licensed — read it, fork it, ship it yourself',
+    ],
+    cta: { label: 'Download for free', href: LATEST },
+    solid: false,
+  },
+  {
+    name: 'Cloud embeddings',
+    price: 'BYO key',
+    per: 'optional',
+    note: 'Only if you want better recall than the local model.',
+    items: [
+      'Swap in Gemini or Voyage embeddings from Settings',
+      'Billed by that provider, to your own API key — Nibble charges nothing',
+      'Your captured text leaves the device only for this, and only once you opt in',
+      'Switch back to on-device at any time',
+    ],
+    cta: { label: 'Read the trade-off', href: '/docs/embeddings/' },
+    solid: true,
+  },
+];
+
 const QUESTIONS = [
   ['What did I promise to send by Friday?', 'clipboard'],
   ['What did we decide about ARM builds?', 'folders'],
@@ -175,6 +208,49 @@ export default function Home() {
                 <h3>{f.title}</h3>
                 <p>{f.body}</p>
               </Link>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ---------------- pricing ---------------- */}
+      <section className="section" id="pricing">
+        <div className="wrap">
+          <div className="head">
+            <p className="eyebrow">pricing</p>
+            <h2>Free, because it runs on your machine.</h2>
+            <p className="lede">
+              There is no server to pay for, so there is nothing to charge you for. The only
+              cost that can ever show up is one you opt into and pay directly to someone else.
+            </p>
+          </div>
+          <div className="pricing-grid">
+            {PLANS.map((plan) => (
+              <div className={`price-card${plan.solid ? ' is-solid' : ''}`} key={plan.name}>
+                <div className="price-head">
+                  <h3>{plan.name}</h3>
+                  <div className="price-amount">
+                    {plan.price}
+                    <span>/ {plan.per}</span>
+                  </div>
+                  <p className="price-note">{plan.note}</p>
+                </div>
+                <div className="price-list">
+                  {plan.items.map((item) => (
+                    <span className="price-item" key={item}>
+                      {CHECK}
+                      {item}
+                    </span>
+                  ))}
+                </div>
+                <a
+                  className={`btn ${plan.solid ? 'btn-outline' : 'btn-primary'}`}
+                  href={plan.cta.href}
+                  style={{ marginTop: 'auto' }}
+                >
+                  {plan.cta.label}
+                </a>
+              </div>
             ))}
           </div>
         </div>
