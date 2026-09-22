@@ -1,16 +1,17 @@
 /* ============================================================
    The notch panel.
 
-   One black silhouette, clipped to a notch-shaped path, which grows
-   out of the physical notch and shrinks back into it. The content
-   inside is laid out at full size the whole time and is revealed by
-   the shape rather than by moving: opening never lays anything out,
-   so the only work per frame is a clip and a transform.
+   One silhouette, clipped to a notch-shaped path, which grows out of
+   the physical notch and shrinks back into it. The content inside is
+   laid out at full size the whole time and is revealed by the shape
+   rather than by moving: opening never lays anything out, so the
+   only work per frame is a clip and a transform.
 
-   Its colours are literals rather than tokens. The panel hangs off a
-   black physical notch in both themes and must not invert when the
-   rest of the system does. The type, the shapes and the spacing come
-   from tokens.css.
+   Colours come from tokens.css, so the panel follows the system's
+   light/dark appearance like the rest of the app. Only the strip
+   (the sliver level with the menu bar, visible while collapsed)
+   stays literal black -- that's the part actually overlapping the
+   physical notch, and it must read as part of it in both themes.
    ============================================================ */
 
 * { box-sizing: border-box; }
@@ -24,7 +25,7 @@ html, body {
   font-size: 13px;
   font-weight: 500;
   line-height: 1.45;
-  color: #f5f5f7;
+  color: var(--text);
   cursor: default;
   user-select: none;
   -webkit-font-smoothing: antialiased;
@@ -135,6 +136,7 @@ body.expanded .strip-text {
 
 .panel {
   padding: 4px 16px 14px;
+  background: var(--surface);
   opacity: 0;
   /* Scaled from the top, so it appears to unfold out of the strip rather
      than to arrive from somewhere else. Transform only: the layout is
@@ -168,19 +170,19 @@ input[type='search'] {
   flex: 1;
   font: inherit;
   font-weight: 500;
-  color: #f5f5f7;
-  background: #141416;
-  border: 1px solid #2a2a2e;
+  color: var(--text);
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius-full);
   padding: 8px 14px;
   user-select: text;
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
-input[type='search']::placeholder { color: #6e6e78; }
+input[type='search']::placeholder { color: var(--text-tertiary); }
 input[type='search']:focus {
   outline: none;
-  border-color: #ffffff;
-  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.22);
+  border-color: var(--border);
+  box-shadow: var(--ring);
 }
 input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
 
@@ -195,11 +197,11 @@ input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
   gap: 6px;
 }
 .hits::-webkit-scrollbar { width: 6px; }
-.hits::-webkit-scrollbar-thumb { background: #2f2f33; border-radius: 3px; }
+.hits::-webkit-scrollbar-thumb { background: var(--border-soft); border-radius: 3px; }
 
 .hit {
-  background: #141416;
-  border: 1px solid #232326;
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius-input);
   padding: 8px 11px;
   cursor: default;
@@ -207,7 +209,7 @@ input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
 .hit .t {
   font-size: 11px;
   font-weight: 700;
-  color: #9b9ba7;
+  color: var(--text-secondary);
   display: flex;
   gap: 6px;
 }
@@ -224,7 +226,7 @@ input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
 .empty {
   margin: 14px 0;
   text-align: center;
-  color: #6e6e78;
+  color: var(--text-tertiary);
   font-size: 12px;
 }
 
@@ -232,7 +234,7 @@ input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
 .now {
   margin: 10px 0 0;
   font-size: 11.5px;
-  color: #9b9ba7;
+  color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -244,9 +246,9 @@ input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
   gap: 8px;
   margin-top: 11px;
   padding-top: 10px;
-  border-top: 1px solid #1f1f22;
+  border-top: 1px solid var(--border-soft);
   font-size: 11px;
-  color: #9b9ba7;
+  color: var(--text-secondary);
 }
 .foot .spacer { flex: 1; }
 
@@ -254,8 +256,8 @@ input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
   font: inherit;
   font-size: 11px;
   font-weight: 700;
-  color: #f5f5f7;
-  background: #1c1c1f;
+  color: var(--text);
+  background: var(--surface-secondary);
   border: 1px solid transparent;
   border-radius: var(--radius-full);
   /* The hit target is bigger than the label: at this size an icon or a
@@ -264,9 +266,9 @@ input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
   cursor: default;
   transition: background 140ms ease, opacity 120ms ease-out, transform 120ms ease-out;
 }
-.ghost:hover { background: #26262a; }
+.ghost:hover { background: var(--surface-hover); }
 .ghost:active { opacity: 0.75; transform: scale(0.97); }
-.ghost.on { background: #ffffff; color: #000000; }
+.ghost.on { background: var(--ink); color: var(--paper); }
 
 /* drag target */
 .drop {
@@ -275,11 +277,11 @@ input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
   display: none;
   align-items: center;
   justify-content: center;
-  background: rgba(0, 0, 0, 0.92);
-  border: 2px dashed #ffffff;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  border: 2px dashed var(--border);
   border-radius: 0 0 var(--radius-xl) var(--radius-xl);
   font-weight: 700;
-  color: #f5f5f7;
+  color: var(--text);
 }
 body.dragging .drop { display: flex; }
 
