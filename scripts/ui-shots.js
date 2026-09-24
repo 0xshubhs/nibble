@@ -85,6 +85,9 @@ const snapshot = {
     quickCapture: {
       enabled: true, accelerator: 'CommandOrControl+Shift+M', registered: true, error: null,
     },
+    recall: {
+      enabled: true, accelerator: 'CommandOrControl+Shift+K', registered: true, error: null,
+    },
   },
   memory: {
     stats: {
@@ -147,12 +150,41 @@ const results = [
   hit('a41f0c8e21b3_0', 'files', 'Standup notes',
     'We are cutting the Windows ARM build until someone actually asks for it. Nobody on the team has hardware to test it on, and the CI minutes are the real cost.',
     2 * 86400000),
-  hit('9d2c1b77aa04_1', 'clipboard', '',
-    'Rotate the staging credentials every ninety days. Whoever is on call does it, and the runbook has the exact steps.',
-    5 * 3600000),
-  hit('55ab90ff1c22_0', 'media', 'Why Rank Fusion Works — Some Channel',
-    'Played "Why Rank Fusion Works" by Some Channel in Brave.\nhttps://www.youtube.com/watch?v=abc123',
-    40 * 60000),
+  {
+    ...hit('9d2c1b77aa04_1', 'clipboard', '',
+      'Rotate the staging credentials every ninety days. Whoever is on call does it, and the runbook has the exact steps.',
+      5 * 3600000),
+    meta: { nowPlaying: { app: 'Spotify', title: 'Weightless', artist: 'Marconi Union' } },
+  },
+  {
+    ...hit('55ab90ff1c22_0', 'media', '4 tracks in Brave',
+      'Played 4 tracks in Brave over 38m: "Why Rank Fusion Works", "BM25 in ten minutes", "Reciprocal Rank Fusion, explained" and 1 more.\nhttps://www.youtube.com/watch?v=abc123',
+      40 * 60000),
+    meta: { app: 'Brave', mediaKind: 'video', trackCount: 4, path: 'https://www.youtube.com/watch?v=abc123' },
+  },
+  {
+    ...hit('7c0912ab34ef_0', 'media', 'Search, Rank, Repeat — Latent Space',
+      'Listened to "Search, Rank, Repeat" on Latent Space in Overcast.',
+      3 * 3600000),
+    meta: { app: 'Overcast', mediaKind: 'podcast', trackCount: 1, artist: 'Latent Space' },
+  },
+];
+
+const askTurns = [
+  {
+    id: 'a1', ts: now - 20 * 60000,
+    question: 'What did we decide about the Windows ARM build?',
+    answer: 'You are cutting it until someone actually asks for it — nobody on the team has ARM hardware to test on, and the CI minutes are the real cost. [1]',
+    sources: [{ id: 'a41f0c8e21b3_0', title: 'Standup notes', source: 'files' }],
+    error: null,
+  },
+  {
+    id: 'a2', ts: now - 5 * 60000,
+    question: 'How often should staging credentials rotate?',
+    answer: '',
+    sources: [],
+    error: 'no-key',
+  },
 ];
 
 const related = [
@@ -242,7 +274,10 @@ window.api = {
   memoryStats: () => Promise.resolve(${JSON.stringify(snapshot.memory.stats)}),
   onState: () => () => {}, onFocusReminder: () => () => {},
   onNotchExpanded: () => () => {}, onNotchPulse: () => () => {},
-  onNotchGeometry: () => () => {},
+  onNotchGeometry: () => () => {}, onNotchMessage: () => () => {},
+  onTimersTick: () => () => {}, onStatsTick: () => () => {},
+  onFocusSearch: () => () => {}, onRecallShown: () => () => {},
+  closeRecall: () => Promise.resolve(), openMemory: () => Promise.resolve(),
   captureNote: () => Promise.resolve({ added: 1, skipped: null }),
   setCapture: () => Promise.resolve({ ok: true, sources: [] }),
   setPaused: () => Promise.resolve(false), forget: () => Promise.resolve(true),
@@ -257,6 +292,39 @@ window.api = {
   saveReminder: ${nothing}, deleteReminder: () => Promise.resolve(true),
   toggleReminder: ${nothing}, snoozeReminder: ${nothing},
   setMcp: ${nothing}, regenerateMcpToken: ${nothing}, setEmbedBackend: ${nothing},
+  askList: () => Promise.resolve(${JSON.stringify(askTurns)}),
+  askQuestion: () => Promise.resolve(${JSON.stringify(askTurns[0])}),
+  askClear: () => Promise.resolve([]),
+
+  // The notch tools' own IPC surface -- not exercised by any shot below yet,
+  // but init() calls a couple of these unconditionally (loadScratchpad, the
+  // onX subscriptions), so a real function has to be here for the panel to
+  // finish loading at all rather than dying partway through paint().
+  clipboardList: () => Promise.resolve([]), clipboardCopy: () => Promise.resolve(true),
+  clipboardPin: () => Promise.resolve([]), clipboardRemove: () => Promise.resolve([]),
+  clipboardClear: () => Promise.resolve([]),
+  shelfList: () => Promise.resolve([]), shelfAdd: () => Promise.resolve([]),
+  shelfRemove: () => Promise.resolve([]), shelfStartDrag: () => {},
+  timersGet: () => Promise.resolve({
+    active: null, running: false, seconds: 0, pomodoroPhase: 'work', pomodoroCount: 0,
+    countdownTotal: 1500, hydrationEnabled: false, hydrationMinutes: 60, hydrationNextAt: null,
+  }),
+  timersStart: ${nothing}, timersPause: ${nothing}, timersReset: ${nothing},
+  timersSetCountdown: ${nothing}, timersSetHydration: ${nothing},
+  calendarAgenda: () => Promise.resolve({ ok: true, events: [], reminders: [] }),
+  calendarCompleteReminder: () => Promise.resolve(true),
+  scratchpadGet: () => Promise.resolve({ text: '', pinned: false, updatedAt: now }),
+  scratchpadSet: ${nothing}, scratchpadPin: ${nothing},
+  notesList: () => Promise.resolve([]), notesCreate: () => Promise.resolve([]),
+  notesUpdate: () => Promise.resolve([]), notesRemove: () => Promise.resolve([]),
+  weatherGet: () => Promise.resolve({ ok: false, location: null, current: null, daily: [], fetchedAt: null }),
+  weatherSetLocation: ${nothing},
+  runMessage: () => Promise.resolve(),
+  statsSubscribe: () => Promise.resolve({
+    cpuPercent: null, memPercent: 0, memUsedBytes: 0, memTotalBytes: 0, disk: null, battery: null,
+    network: null, supported: { disk: false, battery: false, network: false },
+  }),
+  statsUnsubscribe: () => Promise.resolve(),
 };
 <\/script>`;
 
@@ -292,6 +360,16 @@ const driver = `<script>
     document.head.appendChild(css);
   }
   if (typeof applyShape === 'function') applyShape();
+  // A query in the search box, typed and dispatched so the same code path
+  // that runs for a real keystroke is what fills the list.
+  const query = q.get('q');
+  if (query) setTimeout(() => {
+    const input = document.getElementById('q');
+    if (input) {
+      input.value = query;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }, 200);
   // Anything that needs data has to wait for it.
   if (q.get('related')) setTimeout(() => {
     const b = [...document.querySelectorAll('.hit-foot button')]
@@ -322,6 +400,7 @@ const DESKTOP = `
 
 const windowPage = harness('index.html', 'harness-window.html');
 const notchPage = harness('notch.html', 'harness-notch.html', DESKTOP);
+const recallPage = harness('recall.html', 'harness-recall.html', DESKTOP);
 console.log(`  harnesses written to ${path.relative(ROOT, RENDERER)}/`);
 
 /* ---------------- the screenshots ---------------- */
@@ -365,6 +444,10 @@ const shots = [
   ['notch-browser', notchPage, '?browser=1&still=1', '500,140'],
   ['notch-busy', notchPage, '?busy=38&still=1', '500,140'],
   ['notch-expanded', notchPage, '?expanded=1&playing=1&still=1', '500,320'],
+  ['notch-search', notchPage, '?expanded=1&tab=search&q=rank&still=1', '500,320'],
+  ['notch-ask', notchPage, '?expanded=1&tab=ask&still=1', '500,400'],
+  ['recall-empty', recallPage, '?still=1', '560,420'],
+  ['recall-results', recallPage, '?q=rank&still=1', '560,420'],
 ];
 
 for (const [name, page, query, size] of shots) {
