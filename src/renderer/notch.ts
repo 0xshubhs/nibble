@@ -45,6 +45,7 @@ const ICON_FILE =
 const TAB_IDS = [
   'home',
   'search',
+  'ask',
   'clipboard',
   'shelf',
   'notes',
@@ -320,6 +321,12 @@ function paint(state: AppSnapshot | null): void {
   pause.textContent = paused ? 'Paused' : 'Pause';
   pause.classList.toggle('on', paused);
 
+  hasAskKey = Boolean(
+    state.settings.askApiKey ||
+      (state.settings.embedProvider === 'gemini' && state.settings.embedApiKey)
+  );
+  updateAskSetup();
+
   if (activeTab === 'home') renderHome();
 }
 
@@ -459,6 +466,115 @@ async function runNotchSearch(): Promise<void> {
   const hits = q ? await window.api.searchMemory(q, { k: 6 }) : [];
   if (seq !== searchSeq) return;
   renderNotchHits(hits, q);
+}
+
+/* ---------------- ask ---------------- */
+
+let askBusy = false;
+/** Whether *some* key exists to answer with -- a typed-in one, or the
+ *  embedding key when it happens to be pointed at Gemini. */
+let hasAskKey = false;
+
+function updateAskSetup(): void {
+  el('ask-setup').hidden = hasAskKey;
+}
+
+function renderAskThread(turns: AppAskTurn[]): void {
+  const thread = el('ask-thread');
+  const empty = el('ask-empty');
+
+  if (!turns.length) {
+    thread.replaceChildren();
+    empty.hidden = false;
+    return;
+  }
+  empty.hidden = true;
+
+  thread.replaceChildren(
+    ...turns.map((t) => {
+      const turn = document.createElement('div');
+      turn.className = 'ask-turn';
+
+      const q = document.createElement('div');
+      q.className = 'ask-q';
+      q.textContent = t.question;
+      turn.append(q);
+
+      const a = document.createElement('div');
+      a.className = 'ask-a';
+      if (t.error === 'no-key') {
+        a.classList.add('ask-hint');
+        a.textContent = 'Add a Gemini key in Settings → Memory to turn this on.';
+      } else if (t.error) {
+        a.classList.add('ask-hint');
+        a.textContent = t.error;
+      } else {
+        a.textContent = t.answer;
+      }
+      turn.append(a);
+
+      // Which sources it was grounded in, not which chunks -- the panel is
+      // too narrow for a list of titles, and the source names already say
+      // whether the answer leans on a note, a file, or a conversation.
+      if (t.sources.length) {
+        const src = document.createElement('div');
+        src.className = 'ask-sources';
+        src.textContent = [...new Set(t.sources.map((s) => s.source))].join(' · ');
+        turn.append(src);
+      }
+
+      return turn;
+    })
+  );
+  thread.scrollTop = thread.scrollHeight;
+}
+
+async function loadAsk(): Promise<void> {
+  renderAskThread(await window.api.askList());
+}
+
+function bindAsk(): void {
+  const input = el<HTMLInputElement>('ask-q');
+  const button = el<HTMLButtonElement>('ask-send');
+
+  const send = (): void => {
+    if (askBusy) return;
+    const question = input.value.trim();
+    if (!question) return;
+    input.value = '';
+    askBusy = true;
+    button.disabled = true;
+    button.textContent = '…';
+    void window.api
+      .askQuestion(question)
+      .then(() => loadAsk())
+      .finally(() => {
+        askBusy = false;
+        button.disabled = false;
+        button.textContent = 'Ask';
+      });
+  };
+
+  button.addEventListener('click', send);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') send();
+  });
+
+  const keyInput = el<HTMLInputElement>('ask-key');
+  const saveKey = (): void => {
+    const key = keyInput.value.trim();
+    if (!key) return;
+    void window.api.setSetting('askApiKey', key).then(() => {
+      keyInput.value = '';
+      // hasAskKey flips on the next `state` broadcast rather than here, so
+      // this stays the single source of truth instead of two copies of it
+      // drifting apart.
+    });
+  };
+  el('ask-key-save').addEventListener('click', saveKey);
+  keyInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') saveKey();
+  });
 }
 
 /* ---------------- clipboard ---------------- */
@@ -1045,6 +1161,7 @@ function bindMessage(): void {
 /** What has to happen once, the moment a tab becomes visible. */
 function onTabShown(tab: TabId): void {
   if (tab === 'home') renderHome();
+  else if (tab === 'ask') void loadAsk();
   else if (tab === 'clipboard') void loadClipboard();
   else if (tab === 'shelf') void loadShelf();
   else if (tab === 'notes') void loadNotes();
@@ -1098,7 +1215,10 @@ function setExpanded(on: boolean): void {
 
   if (on) {
     if (activeTab === 'search') el('q').focus();
-    else onTabShown(activeTab); // refreshes data and, for stats, resubscribes
+    else if (activeTab === 'ask') {
+      onTabShown(activeTab);
+      el('ask-q').focus();
+    } else onTabShown(activeTab); // refreshes data and, for stats, resubscribes
   } else {
     const q = el<HTMLInputElement>('q');
     q.value = '';
@@ -1302,6 +1422,7 @@ function bindNotch(): void {
 
   bindTimers();
   bindHome();
+  bindAsk();
   bindScratchpad();
   bindNotes();
   bindWeather();

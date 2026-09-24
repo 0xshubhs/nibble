@@ -38,6 +38,9 @@ export const DEFAULTS: StoreData = {
     notchEnabled: false,
     // Zero means measure it. See NotchPanel.notchWidth().
     notchWidth: 0,
+
+    // --- ask panel ---
+    askApiKey: '',
   },
 };
 

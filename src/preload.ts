@@ -95,6 +95,10 @@ const api: RendererApi = {
   weatherGet: () => ipcRenderer.invoke('tools:weather:get'),
   weatherSetLocation: (query) => ipcRenderer.invoke('tools:weather:set-location', query),
 
+  askList: () => ipcRenderer.invoke('tools:ask:list'),
+  askQuestion: (question) => ipcRenderer.invoke('tools:ask:ask', question),
+  askClear: () => ipcRenderer.invoke('tools:ask:clear'),
+
   runMessage: (text) => ipcRenderer.invoke('tools:message:run', text),
 
   onState: (cb) => {

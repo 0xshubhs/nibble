@@ -1,4 +1,5 @@
 import type {
+  AskTurn,
   CalendarAgenda,
   CaptureSourceId,
   ClipboardEntry,
@@ -46,6 +47,7 @@ declare global {
   type AppScratchpadState = ScratchpadState;
   type AppNoteItem = NoteItem;
   type AppWeatherSnapshot = WeatherSnapshot;
+  type AppAskTurn = AskTurn;
 }
 
 export {};

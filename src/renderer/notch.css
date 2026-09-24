@@ -440,6 +440,57 @@ input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
 }
 
 /* ------------------------------------------------------------
+   ask -- a thread of question/answer turns, oldest first, same card
+   language as a search hit rather than a chat bubble: this is still one
+   surface among many in the panel, not a dedicated messaging app.
+   ------------------------------------------------------------ */
+
+.ask-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+  margin-bottom: 10px;
+}
+.ask-thread:empty { margin-bottom: 0; }
+.ask-thread::-webkit-scrollbar { width: 6px; }
+.ask-thread::-webkit-scrollbar-thumb { background: var(--border-soft); border-radius: 3px; }
+
+.ask-turn {
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-input);
+  padding: 8px 11px;
+}
+.ask-q {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+.ask-a {
+  font-size: 12px;
+  margin-top: 4px;
+  white-space: pre-wrap;
+  user-select: text;
+}
+.ask-a.ask-hint { color: var(--text-tertiary); font-style: italic; }
+.ask-sources {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+  margin-top: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.ask-setup {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-input);
+  padding: 8px 11px;
+  margin-bottom: 8px;
+}
+.ask-setup .hint { margin: 0 0 8px; text-align: left; }
+
+/* ------------------------------------------------------------
    now playing, inside the panel
 
    The strip can only afford one line, so opening the panel is the first

@@ -51,6 +51,13 @@
                 <line x1="12.5" y1="12.5" x2="17" y2="17" />
               </svg>
             </button>
+            <button class="rail-btn" data-tab="ask" title="Ask" type="button">
+              <svg class="icon" viewBox="0 0 20 20">
+                <path d="M6 14 L4 17 L7.5 15.5 A6.5 6 0 1 0 6 14 Z" />
+                <line x1="10" y1="7.5" x2="10" y2="9.5" />
+                <circle cx="10" cy="12" r="0.3" />
+              </svg>
+            </button>
             <button class="rail-btn" data-tab="clipboard" title="Clipboard" type="button">
               <svg class="icon" viewBox="0 0 20 20">
                 <rect x="5" y="4" width="10" height="13" rx="1.2" />
@@ -157,6 +164,36 @@
               </div>
               <ul class="hits" id="hits"></ul>
               <p class="empty" id="empty">Drop text or a file here to remember it.</p>
+            </div>
+
+            <div class="view" id="view-ask" hidden>
+              <div class="ask-thread" id="ask-thread"></div>
+              <p class="empty" id="ask-empty">Ask a question about what's in your memory.</p>
+
+              <div class="ask-setup" id="ask-setup" hidden>
+                <p class="hint">Answering needs a Gemini key. Search itself stays local either way.</p>
+                <div class="row">
+                  <input
+                    id="ask-key"
+                    type="password"
+                    placeholder="Gemini API key"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                  <button class="ghost" id="ask-key-save" type="button">Save</button>
+                </div>
+              </div>
+
+              <div class="row">
+                <input
+                  id="ask-q"
+                  type="search"
+                  placeholder="Ask your memory…"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <button class="ghost" id="ask-send" type="button">Ask</button>
+              </div>
             </div>
 
             <div class="view" id="view-clipboard" hidden>

@@ -31,6 +31,7 @@ import * as calendarTool from './tools/calendar';
 import { Scratchpad } from './tools/scratchpad';
 import { NotesStore } from './tools/notes';
 import { Weather } from './tools/weather';
+import { AskHistory } from './tools/ask';
 import type {
   BackendConfig,
   CaptureSourceId,
@@ -76,6 +77,7 @@ let stats: StatsEngine | null = null;
 let scratchpad: Scratchpad | null = null;
 let notes: NotesStore | null = null;
 let weather: Weather | null = null;
+let ask: AskHistory | null = null;
 
 /* ---------------- window ---------------- */
 
@@ -656,6 +658,25 @@ function registerIpc(): void {
     weather?.setLocation(query) ?? null
   );
 
+  ipcMain.handle('tools:ask:list', () => ask?.list() ?? []);
+  ipcMain.handle('tools:ask:clear', () => ask?.clear() ?? []);
+  ipcMain.handle('tools:ask:ask', async (_e, question: string) => {
+    if (!ask || !memory) {
+      return {
+        id: '', question, answer: '', sources: [], error: 'not-ready', ts: Date.now(),
+      };
+    }
+    return ask.ask(question, {
+      search: (q, opts) => memory!.search(q, opts),
+      // A key typed in just for asking wins; failing that, the embedding
+      // key is only usable here if it is pointed at Gemini -- Voyage has
+      // nothing that answers a question.
+      apiKey: () =>
+        store.settings.askApiKey ||
+        (store.settings.embedProvider === 'gemini' ? store.settings.embedApiKey : ''),
+    });
+  });
+
   ipcMain.handle('tools:message:run', (_e, text: string) => {
     const clean = String(text ?? '').trim().slice(0, 240);
     if (!clean) return;
@@ -740,6 +761,7 @@ void app.whenReady().then(() => {
   scratchpad = new Scratchpad(dataPath().dir);
   notes = new NotesStore(dataPath().dir);
   weather = new Weather(dataPath().dir);
+  ask = new AskHistory(dataPath().dir);
 
   // The model load and the first index pass must not hold up the window or
   // the reminder scheduler, so this is deliberately not awaited.

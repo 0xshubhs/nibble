@@ -82,6 +82,14 @@ export interface Settings {
    * with the display's scaling mode, so there is no constant to hardcode.
    */
   notchWidth: number;
+
+  /**
+   * A Gemini key for the in-app "ask" panel -- separate from `embedApiKey`
+   * because that one may be pointed at Voyage, which has no chat API at all.
+   * When it's empty and `embedProvider` is already `gemini`, the panel
+   * offers to reuse `embedApiKey` rather than asking for the same key twice.
+   */
+  askApiKey: string;
 }
 
 export interface StoreData {
@@ -493,6 +501,27 @@ export interface WeatherSnapshot {
   fetchedAt: number | null;
 }
 
+/**
+ * Conversational recall: a question, an answer grounded in memory search,
+ * and which chunks it was grounded in. The retrieval side is always local;
+ * only the question and the excerpts it turned up ever leave the machine,
+ * and only when the person has put in their own key.
+ */
+export interface AskSource {
+  id: string;
+  title: string;
+  source: string;
+}
+
+export interface AskTurn {
+  id: string;
+  question: string;
+  answer: string;
+  sources: AskSource[];
+  error: string | null;
+  ts: number;
+}
+
 /* ---------------- the preload bridge ---------------- */
 
 export interface CaptureToggleResult {
@@ -598,6 +627,11 @@ export interface RendererApi {
 
   weatherGet(): Promise<WeatherSnapshot>;
   weatherSetLocation(query: string): Promise<WeatherSnapshot>;
+
+  askList(): Promise<AskTurn[]>;
+  /** Runs the question through local search and, key permitting, Gemini. */
+  askQuestion(question: string): Promise<AskTurn>;
+  askClear(): Promise<AskTurn[]>;
 
   /** Runs a message across the collapsed strip -- the notch's own marquee. */
   runMessage(text: string): Promise<void>;
