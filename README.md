@@ -2,7 +2,9 @@
 
 A portable, background-running desktop app for **macOS, Windows and Linux** that
 keeps a local memory of what you capture, indexes it on device, and exposes it to
-any LLM over MCP, plus reminders that fire as real system notifications.
+any LLM over MCP -- or answers questions about it itself, from a notch panel on
+macOS or a global-hotkey overlay everywhere else -- plus reminders that fire as
+real system notifications.
 
 One Electron codebase, three real builds: a `.dmg`, a portable `.exe` and an
 `.AppImage`. No account, no server, no telemetry.
@@ -35,8 +37,10 @@ three natively and attaches the results to a GitHub release when you push a tag.
 |---|---|
 | **Memory** | Captures text, chunks it, embeds it on device, and searches it by keyword *and* meaning |
 | **Related** | Any result opens its nearest neighbours in meaning, with no query and no model call |
+| **Ask** | Ask a question in plain language; answered from local search plus your own Gemini key |
+| **Recall overlay** | A second global hotkey opens a floating search box on any platform, and hands the query to the window |
 | **Quick capture** | One global hotkey stores the clipboard on purpose, with nothing watching in between |
-| **Now playing** | Remembers what you listen to and watch, so a day is searchable by what was on |
+| **Now playing** | Remembers what you listen to and watch -- music, podcasts and video told apart -- so a day is searchable by what was on |
 | **MCP connector** | Claude, ChatGPT or any MCP client can query that memory as a tool |
 | **Reminders** | Once, hourly, daily, weekdays, weekly, or a custom interval |
 | **Portable** | Data lives beside the executable, not in your profile |
@@ -149,6 +153,30 @@ capture always wins that space while it is on screen, because it is news and
 it is gone in two seconds; the track is underneath, so the strip returns to
 it rather than to nothing.
 
+A run of tracks from the same app, with no gap over ten minutes, collapses
+into one chunk instead of one row per track -- "4 tracks in Brave over
+38m: ..." -- so "what was I listening to during X" has one readable answer
+rather than a page of individual plays. A session flushes on a gap, an app
+change, or the source stopping, so the tail is never silently dropped.
+
+A podcast or an audiobook is told apart from music, by app name for MPRIS
+and the generic case, and by URL shape for Spotify specifically -- it hosts
+both under the same app, but an episode's link is `.../episode/...` where a
+track's is `.../track/...`. This decides the verb ("Listened to" rather than
+"Played") and tags the chunk so the notch can show a **podcast** pill
+instead of a track count.
+
+Neither Apple Podcasts nor any third-party client ships an AppleScript
+dictionary at all -- confirmed with `sdef` against a real machine -- so
+macOS still only reads title and artist from Spotify and Music. Everywhere
+else, a podcast app is only as readable as any other app is.
+
+Whatever else you capture deliberately -- the clipboard hotkey, a manual
+note -- folds in what was playing at that moment, read fresh rather than
+cached. The notch shows it as a small "♪ track — artist" line under the
+capture it belongs to, so a note and its soundtrack are never two things to
+remember separately.
+
 ### Quick capture
 
 The clipboard source is ambient: while it runs, everything you copy is stored.
@@ -161,6 +189,25 @@ credential, or you saved the same thing within the last six hours. Registering
 a global shortcut can also simply fail, because whichever app asks first owns
 the combination, so Settings shows **not registered** rather than a switch
 that claims to be on.
+
+### Recall overlay
+
+The read side of quick capture, and a second global hotkey (`⌘⇧K` /
+`Ctrl+Shift+K`, off by default). It opens a small floating, always-on-top
+search box on any platform -- not only the notch's Mac-only hover, which is
+the gap this actually closes: Windows and Linux have no fast
+keyboard-driven recall otherwise.
+
+Type, see the top hits inline; Enter or a click hands the query to the main
+window's Memory tab and dismisses the overlay by losing focus, the same way
+a real launcher works, rather than an explicit close. The window is reused
+rather than recreated between summons, centred on whichever display the
+cursor is on, and floats at the notch's own `screen-saver` level so it
+still works over a fullscreen app.
+
+It shares its hotkey-registration logic with quick capture (`src/main/hotkey.ts`):
+the same idempotent `apply()`, the same honest `registered`/`error`
+reporting when another app already owns the combination.
 
 ## Connecting an LLM
 
@@ -193,11 +240,33 @@ spawns it with a plain `node`, which cannot `require` out of a packaged asar.
 | `list_reminders` | Scheduled reminders, soonest first |
 | `add_reminder` | Schedule a notification |
 
+### Ask, without leaving the app
+
+The connector above is for Claude Desktop or Claude Code sitting outside
+Nibble; the **Ask** tab in the notch is the same idea with no client to set
+up. Retrieval is always local -- the same hybrid search everything else
+uses -- and only the question and the handful of chunks it turns up ever
+leave the machine, and only once a key is typed in. No key, no call, and
+the tab says so plainly rather than pretending.
+
+It answers with Gemini specifically, not whichever embedding backend is
+configured: Voyage is one of the two embedding providers and has no chat
+completion endpoint at all, so reusing that switch outright would silently
+fail for half its settings. `askApiKey` is its own setting for that
+reason, and falls back to the embedding key only when that one is already
+pointed at Gemini.
+
 ## The notch panel (macOS)
 
 A panel that hangs off the MacBook notch: hover it for a search box, the next
 reminder and a pause toggle, or drop text or a file on it to remember it. Off
 by default; the switch is in Settings.
+
+Hovering opens a home tab and an icon rail down the side, not just search --
+Ask, Clipboard, Shelf, Notes, Scratchpad, Timers, Stats, Calendar, Weather
+and a marquee Message all live behind their own rail icon, each owning its
+own storage and IPC surface rather than folding into the one state snapshot
+the window and the strip already share.
 
 There is no API for any of this. macOS exposes the notch only through
 `NSScreen.safeAreaInsets`, which Electron does not surface, so the panel is a
@@ -276,18 +345,22 @@ src/main/autostart.ts   login items: LaunchServices / Run key / XDG autostart
 src/main/tray.ts        menu bar icon and menu
 src/main/notifier.ts    native notifications
 src/main/notch.ts       the macOS notch panel
-src/main/quickcapture.ts the global hotkey
+src/main/hotkey.ts      one global keyboard shortcut, registered and reported honestly
+src/main/quickcapture.ts the clipboard hotkey, on top of hotkey.ts
+src/main/recall.ts      the recall overlay, on top of hotkey.ts
 
 src/main/memory/        chunker, store, hybrid search, embedder
 src/main/memory/embed-worker.ts   the model, in its own process
 src/main/capture/       capture sources behind one interface
+src/main/tools/         the notch's eleven self-contained utilities, ask included
 src/main/mcp/server.ts  loopback MCP server
 src/mcp/stdio.ts        dependency-free relay for stdio clients
 
 src/preload.ts          the only bridge into the renderer
 src/renderer/           the window UI (no framework)
-src/renderer/tokens.css the design tokens, shared by both windows
+src/renderer/tokens.css the design tokens, shared by every window
 src/renderer/notch.*    the notch panel's page, styles and script
+src/renderer/recall.*   the recall overlay's page, styles and script
 src/renderer/env.d.ts   ambient types; the renderer stays a script, not a module
 src/test/               store and search tests
 
@@ -315,11 +388,13 @@ npx electron . --dev --screenshot=out.png --tab=memory --query="release process"
 `npm run shots` does the same job without launching anything. The renderer is
 plain HTML, CSS and one compiled script, and the only thing it needs from
 Electron is `window.api`; stub that and the pages run in any Chromium. It
-writes both windows, in every state worth looking at, into `out/shots`:
+writes every window, in every state worth looking at, into `out/shots`:
 
 ```
 out/shots/window-reminders.png    window-memory.png    window-settings.png
 out/shots/notch-collapsed.png     notch-island.png     notch-expanded.png
+out/shots/notch-search.png        notch-ask.png
+out/shots/recall-empty.png        recall-results.png
 ```
 
 Two reasons to prefer it. It draws the UI against interesting data rather
@@ -389,6 +464,10 @@ someone else's server to draw its own text.
 
 [TODO.md](TODO.md): the unbuilt capture sources, the settings that exist
 as an API but not as UI, and what has to happen before a release.
+
+[PENDING.md](PENDING.md): feature bets beyond that -- ideas that extend
+what already exists rather than bolt on something foreign, some shipped,
+some still just ideas.
 
 ## License
 
