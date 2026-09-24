@@ -1,0 +1,106 @@
+/* ============================================================
+   The recall overlay -- a floating card over a transparent window,
+   summoned by its own global hotkey. Same card and hit styling as the
+   notch's search tab, since it is the same idea in a different shell:
+   read, rather than write, from wherever you are.
+   ============================================================ */
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--text);
+  cursor: default;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.card {
+  margin: 14px;
+  height: calc(100% - 28px);
+  background: var(--surface);
+  border: var(--line) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+}
+
+.row { display: flex; }
+
+#q {
+  flex: 1;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 4px 2px 12px;
+  border-bottom: var(--line) solid var(--border-soft);
+}
+#q::placeholder { color: var(--text-tertiary); font-weight: 500; }
+
+.hits {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hits::-webkit-scrollbar { width: 6px; }
+.hits::-webkit-scrollbar-thumb { background: var(--border-soft); border-radius: 3px; }
+
+.hit {
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-input);
+  padding: 8px 11px;
+  cursor: pointer;
+}
+.hit:hover { border-color: var(--border); background: var(--surface-hover); }
+.hit .t {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  display: flex;
+  gap: 6px;
+}
+.hit .b {
+  font-size: 12px;
+  margin-top: 3px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.empty {
+  margin: 24px 0;
+  text-align: center;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.foot {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+  text-align: right;
+}
+.hint {
+  font-size: 10.5px;
+  color: var(--text-tertiary);
+}

@@ -45,6 +45,11 @@ const api: RendererApi = {
   // --- notch panel ---
   setNotch: (enabled) => ipcRenderer.invoke('notch:set', enabled),
   closeNotch: () => ipcRenderer.invoke('notch:collapse'),
+
+  // --- recall overlay ---
+  closeRecall: () => ipcRenderer.invoke('recall:close'),
+  openMemory: (query) => ipcRenderer.invoke('recall:open-memory', query),
+
   // Not an IPC call: webUtils resolves the path synchronously in the preload,
   // which is the only place with the privilege to do it.
   pathForFile: (file) => webUtils.getPathForFile(file),
@@ -110,6 +115,16 @@ const api: RendererApi = {
     const h = (_e: Electron.IpcRendererEvent, id: string): void => cb(id);
     ipcRenderer.on('focus-reminder', h);
     return () => ipcRenderer.off('focus-reminder', h);
+  },
+  onFocusSearch: (cb) => {
+    const h = (_e: Electron.IpcRendererEvent, query: string): void => cb(query);
+    ipcRenderer.on('focus-search', h);
+    return () => ipcRenderer.off('focus-search', h);
+  },
+  onRecallShown: (cb) => {
+    const h = (): void => cb();
+    ipcRenderer.on('recall:shown', h);
+    return () => ipcRenderer.off('recall:shown', h);
   },
   onNotchExpanded: (cb) => {
     const h = (_e: Electron.IpcRendererEvent, on: boolean): void => cb(on);

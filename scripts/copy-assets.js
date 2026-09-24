@@ -14,6 +14,8 @@ const pairs = [
   ['src/renderer/styles.css', 'out/renderer/styles.css'],
   ['src/renderer/notch.html', 'out/renderer/notch.html'],
   ['src/renderer/notch.css', 'out/renderer/notch.css'],
+  ['src/renderer/recall.html', 'out/renderer/recall.html'],
+  ['src/renderer/recall.css', 'out/renderer/recall.css'],
 ];
 
 for (const [from, to] of pairs) {

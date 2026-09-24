@@ -22,6 +22,7 @@ import { CaptureManager } from './capture';
 import { McpBridge } from './mcp/server';
 import { NotchPanel, notchPaths, likelyNotched } from './notch';
 import { QuickCapture, DEFAULT_SHORTCUT } from './quickcapture';
+import { RecallOverlay, recallPaths, DEFAULT_SHORTCUT as RECALL_DEFAULT_SHORTCUT } from './recall';
 import { isSecret } from './capture/clipboard';
 import { TimersEngine } from './tools/timers';
 import { ClipboardHistory } from './tools/clipboard-history';
@@ -65,6 +66,7 @@ let capture: CaptureManager | null = null;
 let mcp: McpBridge | null = null;
 let notch: NotchPanel | null = null;
 let quick: QuickCapture | null = null;
+let recall: RecallOverlay | null = null;
 let win: BrowserWindow | null = null;
 let quitting = false;
 
@@ -189,6 +191,12 @@ function showWindow(focusId?: string): void {
   if (focusId) win.webContents.send('focus-reminder', focusId);
 }
 
+/** What the recall overlay hands off: show the window, run the query there. */
+function openMemoryInWindow(query: string): void {
+  showWindow();
+  win?.webContents.send('focus-search', query);
+}
+
 /* ---------------- sync helpers ---------------- */
 
 /**
@@ -221,6 +229,12 @@ function snapshot(): Snapshot {
       quickCapture: quick?.state() ?? {
         enabled: false,
         accelerator: store.settings.quickCaptureShortcut || DEFAULT_SHORTCUT,
+        registered: false,
+        error: null,
+      },
+      recall: recall?.state() ?? {
+        enabled: false,
+        accelerator: store.settings.recallShortcut || RECALL_DEFAULT_SHORTCUT,
         registered: false,
         error: null,
       },
@@ -362,6 +376,10 @@ function syncQuickCapture(): void {
   quick?.apply(store.settings.quickCaptureEnabled, store.settings.quickCaptureShortcut);
 }
 
+function syncRecall(): void {
+  recall?.apply(store.settings.recallEnabled, store.settings.recallShortcut);
+}
+
 /* ---------------- ipc ---------------- */
 
 function registerIpc(): void {
@@ -427,6 +445,7 @@ function registerIpc(): void {
         autostart.setEnabled(true, { hidden: Boolean(value) });
       }
       if (key === 'quickCaptureEnabled' || key === 'quickCaptureShortcut') syncQuickCapture();
+      if (key === 'recallEnabled' || key === 'recallShortcut') syncRecall();
     }
     pushState();
     return snapshot().settings;
@@ -570,6 +589,9 @@ function registerIpc(): void {
 
   ipcMain.handle('notch:collapse', () => notch?.collapse());
 
+  ipcMain.handle('recall:close', () => recall?.hide());
+  ipcMain.handle('recall:open-memory', (_e, query: string) => openMemoryInWindow(String(query ?? '')));
+
   ipcMain.handle('app:show-window', () => showWindow());
 
   ipcMain.handle('memory:remember-files', async (_e, paths: string[]) => {
@@ -707,6 +729,7 @@ void app.whenReady().then(() => {
   scheduler.on('changed', () => pushState());
 
   quick = new QuickCapture(() => rememberClipboard());
+  recall = new RecallOverlay(recallPaths());
 
   tray = new AppTray({
     store,
@@ -778,6 +801,7 @@ void app.whenReady().then(() => {
       }
       if (store.settings.notchEnabled) notch?.start();
       syncQuickCapture();
+      syncRecall();
       if (store.settings.mcpEnabled && mcp) {
         const info = await mcp.start();
         store.setSetting('mcpPort', info.port ?? store.settings.mcpPort);
@@ -826,6 +850,7 @@ app.on('before-quit', () => {
   memory?.stop();
   notch?.stop();
   quick?.stop();
+  recall?.stop();
   timers?.stop();
   clipboardHistory?.stop();
   stats?.stop();

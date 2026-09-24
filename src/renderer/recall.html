@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; font-src 'self';"
+    />
+    <title>Recall</title>
+    <link rel="stylesheet" href="tokens.css" />
+    <link rel="stylesheet" href="recall.css" />
+  </head>
+  <body>
+    <div class="card">
+      <div class="row">
+        <input
+          id="q"
+          type="text"
+          placeholder="Search your memory…"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+      <ul class="hits" id="hits"></ul>
+      <p class="empty" id="empty">Start typing to search.</p>
+      <div class="foot">
+        <span class="hint">↵ open in Nibble &nbsp;·&nbsp; esc close</span>
+      </div>
+    </div>
+    <script src="recall.js"></script>
+  </body>
+</html>

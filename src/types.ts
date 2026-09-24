@@ -69,6 +69,14 @@ export interface Settings {
   quickCaptureEnabled: boolean;
   quickCaptureShortcut: string;
 
+  /**
+   * Global hotkey for the recall overlay -- the read side of quick capture.
+   * Works on every platform, not just the notch's Mac-only hover: this is
+   * the only fast, keyboard-driven way to search from Windows or Linux.
+   */
+  recallEnabled: boolean;
+  recallShortcut: string;
+
   /** macOS only: the panel that hangs off the notch. */
   notchEnabled: boolean;
   /**
@@ -337,16 +345,19 @@ export interface NotchCapability {
 }
 
 /**
- * The global hotkey's real state. `registered` is what the OS accepted, not
- * what the setting asks for: another app may already own the combination, and
- * the UI has to be able to say so instead of showing a switch that lies.
+ * A global hotkey's real state, shared by quick capture and the recall
+ * overlay. `registered` is what the OS accepted, not what the setting asks
+ * for: another app may already own the combination, and the UI has to be
+ * able to say so instead of showing a switch that lies.
  */
-export interface QuickCaptureState {
+export interface HotkeyState {
   enabled: boolean;
   accelerator: string;
   registered: boolean;
   error: string | null;
 }
+export type QuickCaptureState = HotkeyState;
+export type RecallState = HotkeyState;
 
 export interface AppMeta {
   version: string;
@@ -359,6 +370,7 @@ export interface AppMeta {
   relay: string;
   notch: NotchCapability;
   quickCapture: QuickCaptureState;
+  recall: RecallState;
 }
 
 export interface MemoryView {
@@ -578,6 +590,14 @@ export interface RendererApi {
    */
   closeNotch(): Promise<void>;
 
+  /** The recall overlay asking to be dismissed -- Escape, or losing focus. */
+  closeRecall(): Promise<void>;
+  /**
+   * The recall overlay handing a query to the main window: shows it, switches
+   * to the Memory tab, and runs the search there. Closes the overlay itself.
+   */
+  openMemory(query: string): Promise<void>;
+
   /**
    * A sandboxed renderer gets no usable path off a dropped File, so the
    * preload resolves it through webUtils and the main process reads it.
@@ -639,6 +659,10 @@ export interface RendererApi {
   /** All of these return an unsubscribe function. */
   onState(cb: (state: Snapshot) => void): () => void;
   onFocusReminder(cb: (id: string) => void): () => void;
+  /** The recall overlay handed off a query: switch to Memory and run it. */
+  onFocusSearch(cb: (query: string) => void): () => void;
+  /** The recall overlay was just shown: clear it and refocus the input. */
+  onRecallShown(cb: () => void): () => void;
   onNotchExpanded(cb: (expanded: boolean) => void): () => void;
   onNotchPulse(cb: (label: string) => void): () => void;
   onNotchMessage(cb: (payload: { text: string; durationMs: number }) => void): () => void;

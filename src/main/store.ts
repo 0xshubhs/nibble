@@ -3,6 +3,7 @@ import path from 'path';
 import { EventEmitter } from 'events';
 import { dataPath } from './paths';
 import { DEFAULT_SHORTCUT } from './quickcapture';
+import { DEFAULT_SHORTCUT as RECALL_DEFAULT_SHORTCUT } from './recall';
 import type { Reminder, Settings, StoreData } from '../types';
 
 export const DEFAULTS: StoreData = {
@@ -33,6 +34,10 @@ export const DEFAULTS: StoreData = {
     // --- quick capture ---
     quickCaptureEnabled: false,
     quickCaptureShortcut: DEFAULT_SHORTCUT,
+
+    // --- recall overlay ---
+    recallEnabled: false,
+    recallShortcut: RECALL_DEFAULT_SHORTCUT,
 
     // --- notch panel ---
     notchEnabled: false,

@@ -250,6 +250,20 @@ function renderSettings(): void {
       : '';
   }
 
+  const recall = m.recall;
+  if (recall) {
+    $<HTMLInputElement>('s-recall').checked = recall.enabled;
+    $('recall-key').textContent = prettyAccelerator(recall.accelerator);
+    const badge = $('recall-badge');
+    const clash = recall.enabled && !recall.registered;
+    badge.hidden = !clash;
+    badge.textContent = 'not registered';
+    $('recall-note').classList.toggle('is-warn', clash);
+    $('recall-why').textContent = clash
+      ? (recall.error ?? 'Another app already owns that combination.')
+      : '';
+  }
+
   $('app-name').textContent = m.name || 'Nibble';
   $('app-sub').textContent = [
     m.portable ? 'portable mode' : 'installed',
@@ -728,14 +742,19 @@ function bindMemory(): void {
 
 /* ---------------- wiring ---------------- */
 
+/** Switches tabs the same way a click on one does, for callers that are not one. */
+function activateTab(name: string): void {
+  document
+    .querySelectorAll<HTMLButtonElement>('.tab')
+    .forEach((t) => t.classList.toggle('is-active', t.dataset.tab === name));
+  document
+    .querySelectorAll('.panel')
+    .forEach((p) => p.classList.toggle('is-active', p.id === `panel-${name}`));
+}
+
 function bind(): void {
   document.querySelectorAll<HTMLButtonElement>('.tab').forEach((tab) => {
-    tab.addEventListener('click', () => {
-      document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('is-active', t === tab));
-      document.querySelectorAll('.panel').forEach((p) => {
-        p.classList.toggle('is-active', p.id === `panel-${tab.dataset.tab}`);
-      });
-    });
+    tab.addEventListener('click', () => activateTab(tab.dataset.tab ?? ''));
   });
 
   $('new-btn').addEventListener('click', () => openEditor(null));
@@ -768,6 +787,9 @@ function bind(): void {
   );
   $('s-quick').addEventListener('change', (e) =>
     void window.api.setSetting('quickCaptureEnabled', (e.target as HTMLInputElement).checked)
+  );
+  $('s-recall').addEventListener('change', (e) =>
+    void window.api.setSetting('recallEnabled', (e.target as HTMLInputElement).checked)
   );
 
   $('test-btn').addEventListener('click', () => void window.api.testNotification(null));
@@ -805,6 +827,15 @@ function bind(): void {
     el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     el.classList.add('is-flash');
     setTimeout(() => el.classList.remove('is-flash'), 1600);
+  });
+
+  // A query handed off by the recall overlay: land on Memory with it already
+  // typed in and already searched, not just switched to an empty tab.
+  window.api.onFocusSearch((query) => {
+    activateTab('memory');
+    mem.q = query;
+    $<HTMLInputElement>('m-q').value = query;
+    void runSearch();
   });
 
   // Keeps the "in 12 min" labels honest without a full re-render storm.
