@@ -409,6 +409,28 @@ input::-webkit-search-cancel-button { filter: grayscale(1); opacity: 0.5; }
   overflow: hidden;
   user-select: text;
 }
+/* A session's track count, or "podcast" -- a stroke, not a colour, same as
+   every other state in this panel. */
+.hit .t .kind-pill {
+  font-weight: 600;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 1px 5px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--text-tertiary);
+}
+/* The soundtrack a capture happened to have on, surfaced under it rather
+   than mixed into the body text it was actually captured for. */
+.hit .np-link {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .empty {
   margin: 14px 0;

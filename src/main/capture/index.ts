@@ -81,12 +81,33 @@ export class CaptureManager extends EventEmitter<CaptureEvents> {
     });
   }
 
+  /**
+   * What media is playing right now, if that source is running -- read fresh
+   * on every capture rather than cached, because a clipboard item captured a
+   * minute after the last poll should still link to what was on a moment
+   * ago, not to a stale reading from when the app started.
+   *
+   * Public because quick capture and the manual "remember" call go straight
+   * to the memory store rather than through this class's own `capture()`, so
+   * they need to ask for this the same way.
+   */
+  nowPlaying(): { app: string; title: string; artist: string } | null {
+    const np = this.instances.get('media')?.state().nowPlaying;
+    return np?.title ? { app: np.app, title: np.title, artist: np.artist } : null;
+  }
+
   private context(): CaptureContext {
     return {
       capture: (item: CaptureItem): CaptureResult => {
         // The pause switch is checked here, at the last moment, so a source
         // that is mid-poll cannot slip something past it.
         if (this.paused) return { added: 0, skipped: 'paused' };
+        // The soundtrack, folded into anything but media's own capture of
+        // itself -- a track does not need to cross-link to itself.
+        if (item.source !== 'media') {
+          const playing = this.nowPlaying();
+          if (playing) item = { ...item, meta: { ...(item.meta ?? {}), nowPlaying: playing } };
+        }
         const res = this.memory.capture(item);
         if (res.added) {
           this.emit('captured', {

@@ -416,12 +416,38 @@ function renderNotchHits(hits: AppHit[], query: string): void {
         t.textContent = h.title;
         top.append(t);
       }
+      // A session that collapsed more than one track says how many, so the
+      // hit does not read like a single play when it is a whole sitting.
+      const trackCount = h.meta?.trackCount;
+      if (typeof trackCount === 'number' && trackCount > 1) {
+        const kind = document.createElement('span');
+        kind.className = 'kind-pill';
+        kind.textContent = String(trackCount);
+        top.append(kind);
+      } else if (h.meta?.mediaKind === 'podcast') {
+        const kind = document.createElement('span');
+        kind.className = 'kind-pill';
+        kind.textContent = 'podcast';
+        top.append(kind);
+      }
 
       const body = document.createElement('div');
       body.className = 'b';
       body.textContent = h.text;
 
       li.append(top, body);
+
+      // What was playing when this was captured -- a different question
+      // from the media source's own hits, which are about what was played,
+      // not what was on in the background while something else happened.
+      const playing = h.meta?.nowPlaying;
+      if (playing) {
+        const np = document.createElement('div');
+        np.className = 'np-link';
+        np.textContent = `♪ ${playing.title}${playing.artist ? ` — ${playing.artist}` : ''}`;
+        li.append(np);
+      }
+
       return li;
     })
   );

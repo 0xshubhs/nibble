@@ -1,4 +1,5 @@
-import { gvarValue, parseMpris, playerName } from '../main/capture/media';
+import { classify, gvarValue, parseMpris, playerName } from '../main/capture/media';
+import type { NowPlaying } from '../types';
 
 /**
  * The MPRIS reader parses gdbus output by hand, so these are the shapes it
@@ -75,6 +76,36 @@ ok('spotify track parses', sp?.title === "It's a Title" && sp?.album === 'The Al
 ok('instance suffix is dropped', playerName('org.mpris.MediaPlayer2.brave.instance9412') === 'Brave');
 ok('a plain name is capitalised', playerName('org.mpris.MediaPlayer2.spotify') === 'Spotify');
 ok('an unknown shape still returns something', playerName('org.mpris.MediaPlayer2.vlc') === 'Vlc');
+
+/* ---------------- classify ---------------- */
+
+const track = (over: Partial<NowPlaying>): NowPlaying => ({
+  title: 'A Title',
+  artist: 'An Artist',
+  album: '',
+  url: '',
+  app: 'Spotify',
+  ...over,
+});
+
+ok(
+  'a youtube url is a video regardless of app',
+  classify(track({ app: 'Brave', url: 'https://www.youtube.com/watch?v=x' })) === 'video'
+);
+ok(
+  'a spotify episode url is a podcast even though the app is Spotify',
+  classify(track({ app: 'Spotify', url: 'https://open.spotify.com/episode/abc' })) === 'podcast'
+);
+ok(
+  'a spotify track url is music',
+  classify(track({ app: 'Spotify', url: 'https://open.spotify.com/track/abc' })) === 'music'
+);
+ok('a known podcast app is a podcast with no url at all', classify(track({ app: 'Overcast', url: '' })) === 'podcast');
+ok(
+  'the podcast app match is case-insensitive',
+  classify(track({ app: 'POCKET CASTS', url: '' })) === 'podcast'
+);
+ok('an unrecognised app with no url is music', classify(track({ app: 'Brave', url: '' })) === 'music');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

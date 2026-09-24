@@ -338,7 +338,14 @@ function rememberClipboard(): void {
   }
 
   const title = text.split('\n')[0].slice(0, 80);
-  const res = memory.capture({ source: 'quick', kind: 'clipboard', text, title });
+  const playing = capture?.nowPlaying() ?? null;
+  const res = memory.capture({
+    source: 'quick',
+    kind: 'clipboard',
+    text,
+    title,
+    meta: playing ? { nowPlaying: playing } : undefined,
+  });
   if (res.added) {
     notch?.pulse('Remembered');
     toast('Remembered', title);
@@ -437,7 +444,13 @@ function registerIpc(): void {
   ipcMain.handle('memory:stats', () => memory?.stats() ?? null);
 
   ipcMain.handle('memory:capture', (_e, item: { text: string; title?: string }) => {
-    const res = memory?.capture({ source: 'manual', kind: 'note', ...item }) ?? {
+    const playing = capture?.nowPlaying() ?? null;
+    const res = memory?.capture({
+      source: 'manual',
+      kind: 'note',
+      ...item,
+      meta: playing ? { nowPlaying: playing } : undefined,
+    }) ?? {
       added: 0,
       skipped: 'not-ready',
     };

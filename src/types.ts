@@ -96,6 +96,16 @@ export interface ChunkMeta {
   part?: number;
   parts?: number;
   path?: string;
+  /** music | podcast | video, for a media capture -- how it should be worded and searched. */
+  mediaKind?: string;
+  /** How many tracks a "now playing" capture collapsed into one chunk. */
+  trackCount?: number;
+  /**
+   * What was playing at the moment a *different* source captured something.
+   * Set on clipboard, quick-capture and note items, never on media's own --
+   * a track does not need to cross-link to itself.
+   */
+  nowPlaying?: { app: string; title: string; artist: string } | null;
   [key: string]: unknown;
 }
 

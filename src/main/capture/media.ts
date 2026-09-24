@@ -3,6 +3,7 @@ import { promisify } from 'util';
 import path from 'path';
 import { bundleForAppName, bundleForPid, iconFor } from '../appicon';
 import type {
+  CaptureContext,
   CaptureSource,
   NowPlaying,
   SourceAvailability,
@@ -284,18 +285,114 @@ function keyOf2(np: NowPlaying | null): string {
   return np ? keyOf(np) : '';
 }
 
+export type MediaKind = 'music' | 'podcast' | 'video';
+
 /**
- * What actually gets stored. Written as a sentence rather than as fields,
- * because it is going into a search index that is half semantic: "the video
- * about X I had on last Tuesday" has to be able to match this.
+ * Apps that read episodes rather than tracks, by name.
+ *
+ * None of these are AppleScript-scriptable on macOS -- Apple Podcasts ships
+ * no scripting dictionary at all, and neither do the third-party clients --
+ * so they only ever surface here through the audio-assertion fallback (app
+ * name only) on macOS, or through MPRIS, which reads full metadata for any
+ * of them, on Linux.
  */
-function describe(np: NowPlaying): string {
-  const verb = np.url.includes('youtu') ? 'Watched' : 'Played';
-  const by = np.artist ? ` by ${np.artist}` : '';
-  const on = np.album ? `, from ${np.album}` : '';
-  const where = ` in ${np.app}`;
-  const link = np.url ? `\n${np.url}` : '';
-  return `${verb} "${np.title}"${by}${on}${where}.${link}`;
+const PODCAST_APPS = [
+  'podcasts',
+  'overcast',
+  'pocket casts',
+  'castro',
+  'downcast',
+  'castbox',
+  'audible',
+  'libro.fm',
+  'kasts',
+  'gnome podcasts',
+  'gpodder',
+];
+
+/**
+ * What kind of thing this is, which decides the verb and lets search tell a
+ * podcast apart from a song without reading the text.
+ *
+ * Spotify hosts podcasts in the same app as music, so the app name alone
+ * cannot tell them apart there -- but its share URL does: an episode is
+ * `spotify:episode:...` or `open.spotify.com/episode/...`, a track is
+ * `spotify:track:...`. Everywhere else, the app name is the only signal
+ * there is.
+ */
+export function classify(np: NowPlaying): MediaKind {
+  const url = np.url.toLowerCase();
+  if (url.includes('spotify') && url.includes('episode')) return 'podcast';
+  if (url.includes('youtu')) return 'video';
+  if (PODCAST_APPS.some((a) => np.app.toLowerCase().includes(a))) return 'podcast';
+  return 'music';
+}
+
+function verbFor(kind: MediaKind): string {
+  if (kind === 'video') return 'Watched';
+  if (kind === 'podcast') return 'Listened to';
+  return 'Played';
+}
+
+/* ---------------- session grouping ---------------- */
+
+/**
+ * How long a gap with nothing new qualifying ends a session. Long enough
+ * that pausing between episodes of the same show, or between two tracks
+ * while doing something else, still reads as one sitting; short enough that
+ * this morning's music and this evening's does not become one entry.
+ */
+const SESSION_GAP_MS = 10 * 60_000;
+
+/** At most this many titles are spelled out; the rest are just a count. */
+const SESSION_LIST_MAX = 5;
+
+interface SessionTrack {
+  title: string;
+  artist: string;
+  album: string;
+}
+
+interface Session {
+  app: string;
+  kind: MediaKind;
+  tracks: SessionTrack[];
+  url: string;
+  startedAt: number;
+  lastAt: number;
+}
+
+/**
+ * A session collapsed into one line, so "what was I listening to during X"
+ * has one readable answer instead of a page of individual tracks. A single-
+ * track session reads exactly like `describe()` used to for every track.
+ */
+function describeSession(s: Session): string {
+  const verb = verbFor(s.kind);
+  const durationMin = Math.max(1, Math.round((s.lastAt - s.startedAt) / 60_000));
+  const where = ` in ${s.app}`;
+
+  if (s.tracks.length === 1) {
+    const t = s.tracks[0];
+    const by = t.artist ? (s.kind === 'podcast' ? ` on ${t.artist}` : ` by ${t.artist}`) : '';
+    const on = t.album && s.kind === 'music' ? `, from ${t.album}` : '';
+    const link = s.url ? `\n${s.url}` : '';
+    return `${verb} "${t.title}"${by}${on}${where}.${link}`;
+  }
+
+  const shown = s.tracks.slice(0, SESSION_LIST_MAX).map((t) => `"${t.title}"`);
+  const rest = s.tracks.length - shown.length;
+  const list = rest > 0 ? `${shown.join(', ')} and ${rest} more` : shown.join(', ');
+  const noun = s.kind === 'podcast' ? 'episodes' : s.kind === 'video' ? 'videos' : 'tracks';
+  return `${verb} ${s.tracks.length} ${noun}${where} over ${durationMin}m: ${list}.`;
+}
+
+function sessionTitle(s: Session): string {
+  if (s.tracks.length === 1) {
+    const t = s.tracks[0];
+    return t.artist ? `${t.title} — ${t.artist}` : t.title;
+  }
+  return `${s.tracks.length} ${s.kind === 'podcast' ? 'episodes' : 'tracks'} in ${s.app}`;
 }
 
 /**
@@ -371,10 +468,42 @@ const source: CaptureSource = {
 
     /** The track being watched, and whether it has played long enough yet. */
     let pending: { key: string; since: number } | null = null;
-    const stored = new Set<string>();
+    /** The run of tracks being collapsed into one chunk. */
+    let session: Session | null = null;
+    /** The last track actually folded into the session, so a still-playing
+     *  track is not re-added on every poll. */
+    let lastAddedKey: string | null = null;
+    /** Kept so `stop()` can flush a session it did not start collapsing. */
+    let ctxRef: CaptureContext | null = null;
+
+    const flush = (ctx: CaptureContext): void => {
+      const s = session;
+      if (!s || !s.tracks.length) return;
+      session = null;
+      lastAddedKey = null;
+
+      const res = ctx.capture({
+        source: 'media',
+        kind: 'media',
+        text: describeSession(s),
+        title: sessionTitle(s),
+        ts: s.startedAt,
+        meta: {
+          app: s.app,
+          mediaKind: s.kind,
+          trackCount: s.tracks.length,
+          artist: s.tracks.length === 1 ? s.tracks[0].artist : '',
+          album: s.tracks.length === 1 ? s.tracks[0].album : '',
+          path: s.url,
+        },
+      });
+      if (res.added) captured++;
+      else skipped++;
+    };
 
     return {
       start(ctx) {
+        ctxRef = ctx;
         const tick = async (): Promise<void> => {
           // A slow AppleScript must not stack up behind the next tick.
           if (busy) return;
@@ -388,6 +517,12 @@ const source: CaptureSource = {
               current = np;
               ctx.changed?.();
             }
+
+            // A session that has sat idle long enough is a finished sitting,
+            // whether or not anything new has come along to replace it --
+            // otherwise this morning's playlist would still be "open" and
+            // absorb this evening's into the same chunk.
+            if (session && Date.now() - session.lastAt > SESSION_GAP_MS) flush(ctx);
 
             if (!np) {
               pending = null;
@@ -404,7 +539,7 @@ const source: CaptureSource = {
             }
 
             const key = keyOf(np);
-            if (stored.has(key)) return;
+            if (key === lastAddedKey) return; // already folded in, still playing
 
             if (!pending || pending.key !== key) {
               pending = { key, since: Date.now() };
@@ -412,19 +547,20 @@ const source: CaptureSource = {
             }
             if (Date.now() - pending.since < MIN_PLAY_MS) return;
 
-            const res = ctx.capture({
-              source: 'media',
-              kind: 'media',
-              text: describe(np),
-              title: np.artist ? `${np.title} — ${np.artist}` : np.title,
-              meta: { app: np.app, artist: np.artist, album: np.album, path: np.url },
-            });
-            // Remembered or refused, it is settled: do not ask again about
-            // the same track until it comes round again after a restart.
-            stored.add(key);
-            if (stored.size > 500) stored.delete(stored.values().next().value as string);
-            if (res.added) captured++;
-            else skipped++;
+            const now = Date.now();
+            const kind = classify(np);
+            const continuesSession =
+              session !== null && session.app === np.app && now - session.lastAt < SESSION_GAP_MS;
+
+            if (!continuesSession) {
+              flush(ctx);
+              session = { app: np.app, kind, tracks: [], url: '', startedAt: now, lastAt: now };
+            }
+            session!.tracks.push({ title: np.title, artist: np.artist, album: np.album });
+            session!.lastAt = now;
+            if (np.url) session!.url = np.url;
+            lastAddedKey = key;
+            pending = null;
           } catch (err) {
             // A player quitting mid-call, or automation refused on macOS.
             // Say it once: a poll that logs every eight seconds is noise.
@@ -448,6 +584,13 @@ const source: CaptureSource = {
         timer = null;
         pending = null;
         current = null;
+        // A source stops when its setting is turned off or the app quits --
+        // either way, whatever the session has so far is everything it will
+        // ever have, so it is worth writing down rather than discarding.
+        if (ctxRef) flush(ctxRef);
+        session = null;
+        lastAddedKey = null;
+        ctxRef = null;
       },
 
       state() {
